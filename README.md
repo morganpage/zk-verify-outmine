@@ -7,6 +7,10 @@ This project demonstrates how to use Zero-Knowledge Proofs to verify gaming scor
 - `scripts/`: Integration scripts for zkVerify CLI workflow
 - `server.ts`: Production backend server for proof submission
 - `test.html`: Browser-based proof generation UI
+- `unity/`: Unity WebGL integration files
+  - `Scripts/ZKProverBridge.cs`: C# wrapper for ZK proof generation
+  - `Plugins/WebGL/ZKProver.jslib`: JavaScript bridge to snarkjs
+  - `UNITY_SETUP.md`: Detailed Unity integration guide
 
 ## Prerequisites
 1. **Circom Compiler**: Install from [circom.io](https://docs.circom.io/getting-started/installation/).
@@ -715,6 +719,101 @@ await savePendingScore(playerAddress, totalScore, transactionHash, sessionId);
 // 5. Backend monitors zkVerify for finalization
 // When finalized, verify sessionId uniqueness and update leaderboard
 ```
+
+### Workflow D: Unity WebGL Integration
+
+For Unity games targeting WebGL platform, use the included C# wrapper and JavaScript bridge to generate ZK proofs directly in your game.
+
+**Prerequisites:**
+- Unity 2021.3 or later (WebGL build support)
+- Target platform: WebGL
+
+**Quick Example:**
+
+```csharp
+// 1. Attach ZKProverBridge.cs to a GameObject in your scene
+// 2. Generate proof when game ends
+public class GameManager : MonoBehaviour
+{
+    private int[] levelScores = new int[5];
+    private string playerSecret = "your_player_secret";
+    private string sessionId;
+
+    void Start()
+    {
+        // Generate unique session ID for this game session
+        sessionId = System.Guid.NewGuid().ToString();
+
+        // Subscribe to proof generation events
+        ZKProverBridge.Instance.OnProofGenerated += HandleProofGenerated;
+    }
+
+    public void SubmitScore()
+    {
+        string playerAddress = "0xYourWalletAddress";
+        ZKProverBridge.Instance.GenerateScoreProof(levelScores, playerSecret, sessionId, playerAddress);
+    }
+
+    private void HandleProofGenerated(ZKProofResult result)
+    {
+        if (result.success)
+        {
+            // Send proof to your backend server (POST /verify-score)
+            StartCoroutine(SubmitToBackend(result.proof, result.publicSignals));
+        }
+    }
+
+    private IEnumerator SubmitToBackend(string proof, string[] publicSignals)
+    {
+        string jsonData = $"{{\"proof\": {proof}, \"publicSignals\": {JsonUtility.ToJson(publicSignals)}}}";
+
+        using (UnityWebRequest request = UnityWebRequest.PostWwwForm("http://localhost:3000/verify-score", jsonData))
+        {
+            request.SetRequestHeader("Content-Type", "application/json");
+            yield return request.SendWebRequest();
+
+            if (request.result == UnityWebRequest.Result.Success)
+            {
+                Debug.Log("✅ Proof submitted to zkVerify!");
+            }
+            else
+            {
+                Debug.LogError($"❌ Submission failed: {request.error}");
+            }
+        }
+    }
+}
+```
+
+**Unity Integration Files:**
+
+| File | Purpose | Location |
+|------|---------|----------|
+| `ZKProverBridge.cs` | C# wrapper for ZK proof generation | `unity/Scripts/` |
+| `ZKProver.jslib` | JavaScript bridge to snarkjs | `unity/Plugins/WebGL/` |
+| `score_prover.wasm` | Compiled circuit for witness generation | `unity/StreamingAssets/zk/` |
+| `score_prover_final.zkey` | Proving key for proof generation | `unity/StreamingAssets/zk/` |
+
+**Setup Steps:**
+
+1. Copy `unity/` directory contents to your Unity project's `Assets/` folder
+2. Include `snarkjs` in your WebGL template's `index.html`:
+   ```html
+   <script src="https://cdn.jsdelivr.net/npm/snarkjs@latest/build/snarkjs.min.js"></script>
+   ```
+3. Attach `ZKProverBridge.cs` to a GameObject in your scene
+4. Add circuit files to `StreamingAssets/zk/`:
+   - `score_prover.wasm`
+   - `score_prover_final.zkey`
+5. Build for WebGL platform
+
+**📖 For detailed setup instructions, see: [unity/UNITY_SETUP.md](unity/UNITY_SETUP.md)**
+
+**Notes:**
+- Proof generation takes 2-5 seconds depending on device
+- The `snarkjs` library is ~2MB - affects initial load time
+- Show a loading indicator while generating proofs
+- Circuit files must be in `StreamingAssets/zk/` for WebGL builds
 
 ## Running the Server
 
