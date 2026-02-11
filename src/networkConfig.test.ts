@@ -1,0 +1,115 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { getNetworkConfig, getSeedPhrase, NETWORKS, Network } from './networkConfig';
+
+describe('networkConfig', () => {
+    const originalEnv = process.env;
+
+    beforeEach(() => {
+        process.env = { ...originalEnv };
+    });
+
+    afterEach(() => {
+        process.env = originalEnv;
+    });
+
+    describe('getNetworkConfig', () => {
+        it('should return testnet config by default', () => {
+            delete process.env.ZKVERIFY_NETWORK;
+            const config = getNetworkConfig();
+            
+            expect(config.name).toBe('Volta Testnet');
+            expect(config.websocket).toContain('volta');
+            expect(config.rpc).toContain('volta');
+            expect(config.explorer).toContain('testnet');
+        });
+
+        it('should return testnet config when explicitly set', () => {
+            process.env.ZKVERIFY_NETWORK = 'testnet';
+            const config = getNetworkConfig();
+            
+            expect(config.name).toBe('Volta Testnet');
+            expect(config.faucetUrl).toBe('https://faucet.zkverify.io/');
+        });
+
+        it('should return mainnet config when set', () => {
+            process.env.ZKVERIFY_NETWORK = 'mainnet';
+            const config = getNetworkConfig();
+            
+            expect(config.name).toBe('zkVerify Mainnet');
+            expect(config.faucetUrl).toBeUndefined();
+            expect(config.explorer).toBe('https://zkverify.subscan.io');
+        });
+
+        it('should throw error for invalid network', () => {
+            process.env.ZKVERIFY_NETWORK = 'invalid';
+            
+            expect(() => getNetworkConfig()).toThrow(
+                'Invalid network: invalid. Must be \'testnet\' or \'mainnet\''
+            );
+        });
+
+        it('should use custom WebSocket when provided', () => {
+            process.env.ZKVERIFY_NETWORK = 'testnet';
+            process.env.ZKVERIFY_RPC_WSS = 'wss://custom-rpc.example.com';
+            
+            const config = getNetworkConfig();
+            expect(config.websocket).toBe('wss://custom-rpc.example.com');
+        });
+
+        it('should use custom HTTPS RPC when provided', () => {
+            process.env.ZKVERIFY_NETWORK = 'mainnet';
+            process.env.ZKVERIFY_RPC_HTTPS = 'https://custom-rpc.example.com';
+            
+            const config = getNetworkConfig();
+            expect(config.rpc).toBe('https://custom-rpc.example.com');
+        });
+    });
+
+    describe('getSeedPhrase', () => {
+        it('should return testnet seed phrase when network is testnet', () => {
+            process.env.ZKVERIFY_TESTNET_SEED_PHRASE = 'test phrase twelve words';
+            process.env.ZKVERIFY_NETWORK = 'testnet';
+            
+            const seedPhrase = getSeedPhrase('testnet');
+            expect(seedPhrase).toBe('test phrase twelve words');
+        });
+
+        it('should return mainnet seed phrase when network is mainnet', () => {
+            process.env.ZKVERIFY_MAINNET_SEED_PHRASE = 'main phrase twelve words';
+            process.env.ZKVERIFY_NETWORK = 'mainnet';
+            
+            const seedPhrase = getSeedPhrase('mainnet');
+            expect(seedPhrase).toBe('main phrase twelve words');
+        });
+
+        it('should throw error when testnet seed phrase is missing', () => {
+            delete process.env.ZKVERIFY_TESTNET_SEED_PHRASE;
+            
+            expect(() => getSeedPhrase('testnet')).toThrow(
+                'ZKVERIFY_TESTNET_SEED_PHRASE not found in environment'
+            );
+        });
+
+        it('should throw error when mainnet seed phrase is missing', () => {
+            delete process.env.ZKVERIFY_MAINNET_SEED_PHRASE;
+            
+            expect(() => getSeedPhrase('mainnet')).toThrow(
+                'ZKVERIFY_MAINNET_SEED_PHRASE not found in environment'
+            );
+        });
+    });
+
+    describe('NETWORKS constant', () => {
+        it('should have testnet configuration', () => {
+            expect(NETWORKS.testnet).toBeDefined();
+            expect(NETWORKS.testnet.name).toBe('Volta Testnet');
+            expect(NETWORKS.testnet.faucetUrl).toBeDefined();
+        });
+
+        it('should have mainnet configuration', () => {
+            expect(NETWORKS.mainnet).toBeDefined();
+            expect(NETWORKS.mainnet.name).toBe('zkVerify Mainnet');
+            expect(NETWORKS.mainnet.faucetUrl).toBeUndefined();
+        });
+    });
+});

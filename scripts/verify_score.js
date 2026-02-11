@@ -8,17 +8,48 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-async function run() {
-    const seedPhrase = process.env.ZKVERIFY_SEED_PHRASE;
-    if (!seedPhrase) {
-        console.error("Error: ZKVERIFY_SEED_PHRASE environment variable is not set.");
-        console.error("Please create a .env file and add your seed phrase.");
+const NETWORKS = {
+    testnet: {
+        name: 'Volta Testnet',
+        method: 'Volta',
+        seedEnv: 'ZKVERIFY_TESTNET_SEED_PHRASE',
+        explorer: 'https://zkverify-testnet.subscan.io'
+    },
+    mainnet: {
+        name: 'zkVerify Mainnet',
+        method: 'zkVerify',
+        seedEnv: 'ZKVERIFY_MAINNET_SEED_PHRASE',
+        explorer: 'https://zkverify.subscan.io'
+    }
+};
+
+function getNetworkConfig() {
+    const network = process.env.ZKVERIFY_NETWORK || 'testnet';
+
+    if (!NETWORKS[network]) {
+        console.error(`Error: Invalid network "${network}". Must be 'testnet' or 'mainnet'.`);
         process.exit(1);
     }
 
-    console.log("Starting zkVerify session (Volta testnet)...");
+    const config = NETWORKS[network];
+    const seedPhrase = process.env[config.seedEnv];
+
+    if (!seedPhrase) {
+        console.error(`Error: ${config.seedEnv} not found in environment.`);
+        console.error(`Please create a .env file and add your seed phrase.`);
+        process.exit(1);
+    }
+
+    return { network, config, seedPhrase };
+}
+
+async function run() {
+    const { network, config, seedPhrase } = getNetworkConfig();
+
+    console.log(`Starting zkVerify session (${config.name})...`);
+
     const session = await zkVerifySession.start()
-        .Volta()
+        [config.method]()
         .withAccount(seedPhrase);
 
     const proofPath = path.join(__dirname, "../proof.json");
@@ -58,7 +89,7 @@ async function run() {
         events.on("finalized", (details) => {
             console.log("\n✅ Proof successfully verified and finalized by zkVerify!");
             console.log(`Block Hash: ${details.blockHash}`);
-            console.log(`View on Explorer: https://testnet-explorer.zkverify.io/vverify/transaction/${transactionInfo.txHash}`);
+            console.log(`View on Explorer: ${config.explorer}/vverify/transaction/${transactionInfo.txHash}`);
             process.exit(0);
         });
 
