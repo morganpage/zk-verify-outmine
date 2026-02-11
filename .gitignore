@@ -1,0 +1,103 @@
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Environment variables (contains sensitive seed phrases)
+.env
+.env.local
+.env.*.local
+
+# Circuit artifacts (large binary files)
+circuits/*.r1cs
+circuits/*.wasm
+circuits/*.zkey
+circuits/*_js/
+circuits/*.sym
+circuits/*_0000.zkey
+circuits/*_final.zkey
+
+# Powers of Tau files (large setup files)
+pot*.ptau
+*.ptau
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Editor/IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.code-workspace
+
+# AI assistants and tools
+.ai/
+.claude/
+.cursor/
+.aider/
+.openai/
+.copilot/
+.ask/
+.continue/
+.windsurf/
+.perplexity/
+.anthropic/
+.askai/
+.ask_code/
+.roo_code/
+.chatgpt/
+.gemini/
+
+# AI-generated files
+*.ai
+*.chatgpt
+*.copilot
+*.aider
+.cursor-requests
+AGENTS.md
+
+
+# Test coverage
+coverage/
+.nyc_output/
+lcov.info
+
+# Temporary test files
+proof.json
+public.json
+input.json
+
+# Misc
+*.pid
+*.seed
+*.pid.lock
+.cache/
+.temp/
+tmp/

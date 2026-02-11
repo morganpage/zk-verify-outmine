@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZK Score Prover - Browser Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/snarkjs@latest/build/snarkjs.min.js"></script>
+    <!-- zkverifyjs is now handled by the backend -->
+    <style>
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #12121a;
+            --accent: #6366f1;
+            --accent-glow: rgba(99, 102, 241, 0.3);
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --success: #22c55e;
+            --error: #ef4444;
+            --warning: #f59e0b;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, var(--accent), #a855f7);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .subtitle {
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
+        }
+
+        .card {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .card h2 {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            margin-bottom: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .input-group {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .input-group input {
+            background: var(--bg-primary);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 0.75rem;
+            color: var(--text-primary);
+            font-size: 1rem;
+            text-align: center;
+        }
+
+        .input-group input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .field {
+            margin-bottom: 1rem;
+        }
+
+        .field label {
+            display: block;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .field input,
+        .field select {
+            width: 100%;
+            background: var(--bg-primary);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 0.75rem;
+            color: var(--text-primary);
+            font-size: 1rem;
+        }
+
+        .field input:focus,
+        .field select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        button {
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 1rem 2rem;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        button.secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-primary);
+        }
+
+        button.secondary:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px var(--accent-glow);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .status {
+            padding: 1rem;
+            border-radius: 8px;
+            margin-top: 1rem;
+            font-family: monospace;
+            font-size: 0.875rem;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .status.success {
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid var(--success);
+            color: var(--success);
+        }
+
+        .status.error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--error);
+            color: var(--error);
+        }
+
+        .status.loading {
+            background: rgba(99, 102, 241, 0.1);
+            border: 1px solid var(--accent);
+            color: var(--accent);
+        }
+
+        .status.warning {
+            background: rgba(245, 158, 11, 0.1);
+            border: 1px solid var(--warning);
+            color: var(--warning);
+        }
+
+        .total {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--accent);
+        }
+
+        .output {
+            background: var(--bg-primary);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-top: 1rem;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .step {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .step-icon {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+        }
+
+        .step-icon.pending {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .step-icon.running {
+            background: var(--accent);
+            animation: pulse 1s infinite;
+        }
+
+        .step-icon.done {
+            background: var(--success);
+        }
+
+        .step-icon.error {
+            background: var(--error);
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+
+        @media (max-width: 640px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .monospace {
+            color: var(--accent);
+            font-family: monospace;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🎮 ZK Score Prover</h1>
+        <p class="subtitle">Generate proofs and verify them on zkVerify Testnet</p>
+
+        <div class="card">
+            <h2>1. Circuit Files</h2>
+                <div class="field">
+                    <label>WASM File Path</label>
+                    <input type="text" id="wasmPath" value="circuits/score_prover_js/score_prover.wasm">
+                </div>
+                <div class="field">
+                    <label>ZKey File Path</label>
+                    <input type="text" id="zkeyPath" value="circuits/score_prover_final.zkey">
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>2. Game Data & Identity</h2>
+            <div class="input-group">
+                <input type="number" id="score1" value="100" min="0" max="1000">
+                <input type="number" id="score2" value="200" min="0" max="1000">
+                <input type="number" id="score3" value="150" min="0" max="1000">
+                <input type="number" id="score4" value="300" min="0" max="1000">
+                <input type="number" id="score5" value="250" min="0" max="1000">
+            </div>
+            <p style="margin-bottom: 1.5rem;">Total Score: <span class="total" id="totalScore">1000</span></p>
+
+            <div class="grid">
+                <div class="field">
+                    <label>Player Secret (Private) - Text, number, or hex (0x...) accepted</label>
+                    <input type="text" id="secret" value="my-secret-key-12345">
+                </div>
+                <div class="field">
+                    <label>Session ID (Replay Protection) - Auto-generated</label>
+                    <input type="text" id="sessionId" readonly>
+                </div>
+                <div class="field">
+                    <label>Player Address (Public) - Hex address (0x...)</label>
+                    <input type="text" id="playerAddress" value="0x1234567890abcdef1234567890abcdef12345678">
+                </div>
+            </div>
+        </div>
+
+        <div style="display: flex; gap: 1rem; margin-bottom: 2rem;">
+            <button id="generateBtn" onclick="generateProof()" style="flex: 1;">
+                Step 1: Generate ZK Proof
+            </button>
+            <button id="submitBtn" onclick="submitToZkVerify()" disabled style="flex: 1; background: var(--success);">
+                Step 2: Submit to zkVerify
+            </button>
+        </div>
+
+        <div id="steps" class="card hidden">
+            <div class="step" id="step1">
+                <div class="step-icon pending">1</div>
+                <span>Phase 1: Computing ZK Proof...</span>
+            </div>
+            <div class="step" id="step2">
+                <div class="step-icon pending">2</div>
+                <span>Phase 2: Submitting to Network...</span>
+            </div>
+            <div class="step" id="step3">
+                <div class="step-icon pending">3</div>
+                <span>Phase 3: Finalizing on zkVerify...</span>
+            </div>
+        </div>
+
+        <div id="result"></div>
+        <div id="proofOutput" class="output hidden"></div>
+
+        <!-- zkverifyjs handled by backend -->
+
+        <script>
+            let lastProof = null;
+            let currentSession = null;
+
+            // Initialize
+            document.getElementById('sessionId').value = Date.now().toString() + Math.floor(Math.random() * 1000).toString();
+            updateTotal();
+
+            document.querySelectorAll('.input-group input').forEach(input => {
+                input.addEventListener('input', updateTotal);
+            });
+
+            function updateTotal() {
+                const scores = [1, 2, 3, 4, 5].map(i => parseInt(document.getElementById(`score${i}`).value) || 0);
+                document.getElementById('totalScore').textContent = scores.reduce((a, b) => a + b, 0);
+            }
+
+            function stringToHex(str) {
+                let hex = '';
+                for (let i = 0; i < str.length; i++) {
+                    hex += str.charCodeAt(i).toString(16).padStart(2, '0');
+                }
+                return '0x' + hex;
+            }
+
+            function toBigInt(value) {
+                const str = value.trim();
+                if (str.startsWith('0x')) {
+                    return BigInt(str);
+                }
+                try {
+                    // Try to convert to BigInt directly (for numeric strings)
+                    return BigInt(str);
+                } catch (e) {
+                    // If that fails, it's probably a string like "my-secret", convert to hex
+                    return BigInt(stringToHex(str));
+                }
+            }
+
+            function setStepStatus(stepNum, status) {
+                const step = document.getElementById(`step${stepNum}`);
+                const icon = step.querySelector('.step-icon');
+                icon.className = `step-icon ${status}`;
+                if (status === 'done') icon.textContent = '✓';
+                else if (status === 'error') icon.textContent = '✗';
+                else icon.textContent = stepNum;
+            }
+
+            async function generateProof() {
+                const btn = document.getElementById('generateBtn');
+                const stepsDiv = document.getElementById('steps');
+                const resultDiv = document.getElementById('result');
+                const outputDiv = document.getElementById('proofOutput');
+
+                btn.disabled = true;
+                stepsDiv.classList.remove('hidden');
+                resultDiv.innerHTML = '';
+                outputDiv.classList.add('hidden');
+                [1, 2, 3].forEach(i => setStepStatus(i, 'pending'));
+
+                try {
+                    setStepStatus(1, 'running');
+                    const scores = [1, 2, 3, 4, 5].map(i => parseInt(document.getElementById(`score${i}`).value) || 0);
+                    const claimedTotal = scores.reduce((a, b) => a + b, 0);
+
+                    const input = {
+                        scores: scores,
+                        secret: toBigInt(document.getElementById('secret').value),
+                        claimedTotal: claimedTotal,
+                        sessionId: toBigInt(document.getElementById('sessionId').value),
+                        playerAddress: toBigInt(document.getElementById('playerAddress').value)
+                    };
+
+                    const wasmPath = document.getElementById('wasmPath').value;
+                    const zkeyPath = document.getElementById('zkeyPath').value;
+
+                    const { proof, publicSignals } = await snarkjs.groth16.fullProve(input, wasmPath, zkeyPath);
+
+                    lastProof = { proof, publicSignals };
+                    setStepStatus(1, 'done');
+
+                    resultDiv.innerHTML = `
+                        <div class="status success">
+                            ✅ Proof generated successfully!
+                            You can now submit it to the zkVerify network.
+                        </div>
+                    `;
+
+                    document.getElementById('submitBtn').disabled = false;
+                    outputDiv.classList.remove('hidden');
+                    outputDiv.innerHTML = `<strong>Proof Data:</strong>\n${JSON.stringify(proof, null, 2)}`;
+
+                } catch (error) {
+                    setStepStatus(1, 'error');
+                    resultDiv.innerHTML = `<div class="status error">❌ Proof generation failed: ${error.message}</div>`;
+                } finally {
+                    btn.disabled = false;
+                }
+            }
+
+            async function submitToZkVerify() {
+                const btn = document.getElementById('submitBtn');
+                const resultDiv = document.getElementById('result');
+
+                btn.disabled = true;
+                setStepStatus(2, 'running');
+
+                try {
+                    resultDiv.innerHTML = `<div class="status loading">⏳ Relaying proof to backend server...</div>`;
+
+                    const response = await fetch('http://localhost:3000/verify-score', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            proof: lastProof.proof,
+                            publicSignals: lastProof.publicSignals
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (!data.success) {
+                        throw new Error(data.error || 'Backend submission failed');
+                    }
+
+                    setStepStatus(2, 'done');
+                    setStepStatus(3, 'running');
+
+                    resultDiv.innerHTML = `
+                        <div class="status success">
+                            🚀 Proof accepted by backend!
+                            <br>
+                            <strong>Transaction Hash:</strong> <span class="monospace">${data.transactionHash}</span>
+                            <br><br>
+                            The transaction is being processed by zkVerify.
+                            <br>
+                            <a href="${data.explorerUrl}" target="_blank" style="color: var(--accent);">View on Explorer</a>
+                        </div>
+                    `;
+
+                    setStepStatus(3, 'done');
+
+                } catch (error) {
+                    setStepStatus(2, 'error');
+                    setStepStatus(3, 'error');
+                    resultDiv.innerHTML = `<div class="status error">❌ Backend Error: ${error.message}</div>`;
+                } finally {
+                    btn.disabled = false;
+                }
+            }
+        </script>
+    </div>
+</body>
+
+</html>
