@@ -139,8 +139,19 @@ Events are returned from both `verify()` and `batchVerify()` methods:
 ```typescript
 import { zkVerifySession, Library, CurveType } from 'zkverifyjs';
 import { ZkVerifyEvents } from 'zkverifyjs';
+import { getNetworkConfig, getSeedPhrase, Network } from './src/networkConfig';
 
-const session = await zkVerifySession.start().Volta().withAccount(seedPhrase);
+const networkConfig = getNetworkConfig();
+const network: Network = (process.env.ZKVERIFY_NETWORK as Network) || 'testnet';
+const seedPhrase = getSeedPhrase(network);
+
+const session = await zkVerifySession.start()
+    .Custom({
+                websocket: networkConfig.websocket,
+                rpc: networkConfig.rpc,
+                network: network === 'mainnet' ? 'zkVerify' : 'Volta'
+            })
+    .withAccount(seedPhrase);
 
 const { events, transactionResult } = await session
     .verify()
@@ -164,7 +175,7 @@ events.on('includedInBlock', (eventData) => {
 events.on('finalized', (eventData) => {
     console.log('✅ Transaction finalized!');
     console.log('Block Hash:', eventData.blockHash);
-    console.log('Explorer:', `https://testnet-explorer.zkverify.io/vverify/transaction/${eventData.txHash}`);
+    console.log('Explorer:', `${networkConfig.explorer}/vverify/transaction/${eventData.txHash}`);
     // Update leaderboard, send notification, etc.
 });
 
@@ -275,14 +286,21 @@ Use the `session.subscribe()` method to listen for specific events:
 ```typescript
 import { zkVerifySession, ZkVerifyEvents } from 'zkverifyjs';
 import dotenv from 'dotenv';
+import { getNetworkConfig, getSeedPhrase, Network } from './src/networkConfig';
 dotenv.config();
-
-const seedPhrase = process.env.ZKVERIFY_SEED_PHRASE;
 
 async function setupLeaderboardMonitor() {
     // Start session
+    const networkConfig = getNetworkConfig();
+    const network: Network = (process.env.ZKVERIFY_NETWORK as Network) || 'testnet';
+    const seedPhrase = getSeedPhrase(network);
+
     const session = await zkVerifySession.start()
-        .Volta()
+        .Custom({
+                websocket: networkConfig.websocket,
+                rpc: networkConfig.rpc,
+                network: network === 'mainnet' ? 'zkVerify' : 'Volta'
+            })
         .withAccount(seedPhrase);
 
     // Subscribe to proof verification events
@@ -351,9 +369,17 @@ CREATE TABLE leaderboard (
 */
 
 async function startZkMonitor() {
+    const networkConfig = getNetworkConfig();
+    const network: Network = (process.env.ZKVERIFY_NETWORK as Network) || 'testnet';
+    const seedPhrase = getSeedPhrase(network);
+
     zkSession = await zkVerifySession.start()
-        .Volta()
-        .withAccount(process.env.ZKVERIFY_SEED_PHRASE);
+        .Custom({
+                websocket: networkConfig.websocket,
+                rpc: networkConfig.rpc,
+                network: network === 'mainnet' ? 'zkVerify' : 'Volta'
+            })
+        .withAccount(seedPhrase);
 
     zkSession.subscribe([
         {
@@ -433,9 +459,17 @@ CREATE TABLE pending_verifications (
 fastify.post('/verify-score', async (request, reply) => {
     const { proof, publicSignals } = request.body;
 
+    const networkConfig = getNetworkConfig();
+    const network: Network = (process.env.ZKVERIFY_NETWORK as Network) || 'testnet';
+    const seedPhrase = getSeedPhrase(network);
+
     const session = await zkVerifySession.start()
-        .Volta()
-        .withAccount(process.env.ZKVERIFY_SEED_PHRASE);
+        .Custom({
+                websocket: networkConfig.websocket,
+                rpc: networkConfig.rpc,
+                network: network === 'mainnet' ? 'zkVerify' : 'Volta'
+            })
+        .withAccount(seedPhrase);
 
     const { transactionResult } = await session.verify()
         .groth16({ library: Library.snarkjs, curve: CurveType.bn128 })
@@ -845,13 +879,17 @@ Use `registerVerificationKey()` method to upload your VK to zkVerify:
 
 ```typescript
 import { zkVerifySession, Library, CurveType } from 'zkverifyjs';
+import { getNetworkConfig, getSeedPhrase, Network } from './src/networkConfig';
 import dotenv from 'dotenv';
 import fs from 'fs';
 dotenv.config();
 
-const seedPhrase = process.env.ZKVERIFY_SEED_PHRASE;
+async function setupRegisteredVK() {
+    const networkConfig = getNetworkConfig();
+    const network: Network = (process.env.ZKVERIFY_NETWORK as Network) || 'testnet';
+    const seedPhrase = getSeedPhrase(network);
 
-// Start session
+    // Start session
 const session = await zkVerifySession.start()
     .Volta()
     .withAccount(seedPhrase);
@@ -872,7 +910,7 @@ const { events, transactionResult } = await session
 const vkTransactionInfo = await transactionResult;
 console.log('✅ Verification Key Registered!');
 console.log('Statement Hash:', vkTransactionInfo.statementHash);
-console.log('View on Explorer:', `https://testnet-explorer.zkverify.io/vverify/transaction/${vkTransactionInfo.txHash}`);
+console.log('View on Explorer:', `${networkConfig.explorer}/vverify/transaction/${vkTransactionInfo.txHash}`);
 ```
 
 ### Submitting Proofs with Registered VK
@@ -939,17 +977,24 @@ fastify.post('/verify-score', async (request, reply) => {
 
 ```typescript
 import { zkVerifySession, Library, CurveType } from 'zkverifyjs';
+import { getNetworkConfig, getSeedPhrase, Network } from './src/networkConfig';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 dotenv.config();
 
 async function setupRegisteredVK() {
-    const seedPhrase = process.env.ZKVERIFY_SEED_PHRASE;
+    const networkConfig = getNetworkConfig();
+    const network: Network = (process.env.ZKVERIFY_NETWORK as Network) || 'testnet';
+    const seedPhrase = getSeedPhrase(network);
 
     // Start session
     const session = await zkVerifySession.start()
-        .Volta()
+        .Custom({
+                websocket: networkConfig.websocket,
+                rpc: networkConfig.rpc,
+                network: network === 'mainnet' ? 'zkVerify' : 'Volta'
+            })
         .withAccount(seedPhrase);
 
     // Load verification key
@@ -971,7 +1016,7 @@ async function setupRegisteredVK() {
     events.on('finalized', (data) => {
         console.log('✅ VK registration finalized!');
         console.log('📋 Statement Hash:', data.statementHash);
-        console.log('🔗 Explorer:', `https://testnet-explorer.zkverify.io/vverify/transaction/${data.txHash}`);
+        console.log('🔗 Explorer:', `${networkConfig.explorer}/vverify/transaction/${data.txHash}`);
     });
 
     events.on('error', (error) => {
@@ -1025,6 +1070,153 @@ async function submitProofWithVK(proof, publicSignals, mode) {
 }
 ```
 
+## Network Configuration
+
+This project supports switching between zkVerify testnet (Volta) and mainnet through environment variables.
+
+### Quick Switch
+
+**Default (Testnet):**
+```bash
+# Uses testnet (default if ZKVERIFY_NETWORK not set)
+npm run dev
+```
+
+**Switch to Mainnet:**
+```bash
+# Option 1: Set environment variable
+ZKVERIFY_NETWORK=mainnet npm run dev
+
+# Option 2: Use convenience script
+npm run dev:mainnet
+```
+
+**Verify on Testnet:**
+```bash
+ZKVERIFY_NETWORK=testnet node scripts/verify_score.js
+# Or use convenience script:
+npm run verify:testnet
+```
+
+**Verify on Mainnet:**
+```bash
+ZKVERIFY_NETWORK=mainnet node scripts/verify_score.js
+# Or use convenience script:
+npm run verify:mainnet
+```
+
+### Environment Variables
+
+| Variable | Required | Description | Default |
+|----------|-----------|-------------|----------|
+| `ZKVERIFY_NETWORK` | No | Network: `testnet` or `mainnet` | `testnet` |
+| `ZKVERIFY_TESTNET_SEED_PHRASE` | Yes (for testnet) | Seed phrase for Volta testnet wallet | - |
+| `ZKVERIFY_MAINNET_SEED_PHRASE` | Yes (for mainnet) | Seed phrase for mainnet wallet | - |
+| `ZKVERIFY_RPC_WSS` | No | Custom WebSocket RPC endpoint | - |
+| `ZKVERIFY_RPC_HTTPS` | No | Custom HTTPS RPC endpoint | - |
+
+### Network Details
+
+| Network | Explorer | Faucet | Notes |
+|---------|----------|--------|-------|
+| **Testnet (Volta)** | [zkverify-testnet.subscan.io](https://zkverify-testnet.subscan.io) | [faucet.zkverify.io](https://faucet.zkverify.io/) | Free test tokens, for development |
+| **Mainnet** | [zkverify.subscan.io](https://zkverify.subscan.io) | None | Real VFY tokens, production use |
+
+### Using Ankr RPC (Recommended for Production)
+
+Ankr provides higher rate limits and better reliability for production applications.
+
+**Setup:**
+1. Create a free account at [Ankr](https://www.ankr.com/web3-api/chains-list/zkverify/)
+2. Get your API key
+3. Add to your `.env`:
+
+```bash
+# Testnet with Ankr
+ZKVERIFY_NETWORK=testnet
+ZKVERIFY_TESTNET_SEED_PHRASE="your testnet seed phrase"
+ZKVERIFY_RPC_WSS=wss://rpc.ankr.com/zkverify_volta_testnet/ws/YOUR_API_KEY
+ZKVERIFY_RPC_HTTPS=https://rpc.ankr.com/zkverify_volta_testnet/YOUR_API_KEY
+```
+
+```bash
+# Mainnet with Ankr
+ZKVERIFY_NETWORK=mainnet
+ZKVERIFY_MAINNET_SEED_PHRASE="your mainnet seed phrase"
+ZKVERIFY_RPC_WSS=wss://rpc.ankr.com/zkverify_mainnet/ws/YOUR_API_KEY
+ZKVERIFY_RPC_HTTPS=https://rpc.ankr.com/zkverify_mainnet/YOUR_API_KEY
+```
+
+**Benefits of Ankr:**
+- Higher rate limits (no throttling under load)
+- Better uptime and reliability
+- Faster response times
+- No additional cost for basic tier
+
+### Security Best Practices
+
+1. **Use different wallets for testnet and mainnet**
+   ```bash
+   # .env file
+   ZKVERIFY_TESTNET_SEED_PHRASE="test wallet seed phrase..."
+   ZKVERIFY_MAINNET_SEED_PHRASE="main wallet seed phrase..."
+   ```
+
+2. **Never commit seed phrases to version control**
+   - `.env` is already in `.gitignore`
+   - Keep `.env.example` as a template only
+
+3. **Test on testnet first**
+   - Verify proof generation works
+   - Check proof submission flow
+   - Confirm leaderboard integration
+   - Only then switch to mainnet
+
+### Example: Full Configuration
+
+```bash
+# .env - Mainnet configuration with Ankr
+ZKVERIFY_NETWORK=mainnet
+ZKVERIFY_MAINNET_SEED_PHRASE="your mainnet seed phrase here"
+ZKVERIFY_RPC_WSS=wss://rpc.ankr.com/zkverify_mainnet/ws/YOUR_API_KEY
+ZKVERIFY_RPC_HTTPS=https://rpc.ankr.com/zkverify_mainnet/YOUR_API_KEY
+```
+
+```bash
+# .env - Testnet configuration
+ZKVERIFY_NETWORK=testnet
+ZKVERIFY_TESTNET_SEED_PHRASE="your testnet seed phrase here"
+# Ankr optional for testnet
+```
+
+### Migration Guide
+
+This project requires migration from the old single seed phrase configuration.
+
+**Old configuration (no longer supported):**
+```bash
+# This will no longer work
+ZKVERIFY_SEED_PHRASE="your seed phrase"
+```
+
+**New configuration (required):**
+```bash
+# Update to network-specific variables
+ZKVERIFY_NETWORK=testnet
+ZKVERIFY_TESTNET_SEED_PHRASE="your seed phrase"
+
+# Also add mainnet configuration when ready:
+ZKVERIFY_MAINNET_SEED_PHRASE="your mainnet seed phrase"
+```
+
+**Migration Steps:**
+1. Open your `.env` file
+2. Add `ZKVERIFY_NETWORK=testnet` (or `mainnet`)
+3. Rename `ZKVERIFY_SEED_PHRASE` to either:
+   - `ZKVERIFY_TESTNET_SEED_PHRASE` (for testnet)
+   - `ZKVERIFY_MAINNET_SEED_PHRASE` (for mainnet)
+4. Consider adding to other network configuration for future use
+
 ## Troubleshooting
 
 ### Common Issues
@@ -1034,9 +1226,10 @@ async function submitProofWithVK(proof, publicSignals, mode) {
 - Verify that `claimedTotal` equals the sum of scores
 - Ensure all inputs are in correct format (bigints, hex strings, or numbers)
 
-**"ZKVERIFY_SEED_PHRASE not found in environment"**
+**"ZKVERIFY_TESTNET_SEED_PHRASE not found in environment" or "ZKVERIFY_MAINNET_SEED_PHRASE not found"**
 - Create a `.env` file in the root directory
 - Copy your seed phrase from `.env.example` and replace with your actual seed phrase
+- Ensure `ZKVERIFY_NETWORK` is set to `testnet` or `mainnet`
 - Ensure `.env` is in the project root (not in a subdirectory)
 
 **"Transaction failed" or "Insufficient balance"**
@@ -1064,9 +1257,9 @@ async function submitProofWithVK(proof, publicSignals, mode) {
 ## Security Best Practices
 
 1. **Never hardcode seed phrases**
-   - Always use environment variables (`ZKVERIFY_SEED_PHRASE`)
-   - Add `.env` to `.gitignore`
-   - Never commit `.env` files to version control
+    - Always use network-specific environment variables (`ZKVERIFY_TESTNET_SEED_PHRASE`, `ZKVERIFY_MAINNET_SEED_PHRASE`)
+    - Add `.env` to `.gitignore`
+    - Never commit `.env` files to version control
 
 2. **Use unique session IDs**
    - Generate unique session IDs per game session
@@ -1391,7 +1584,9 @@ The security model works as follows:
 ## Resources
 
 - [zkVerify Documentation](https://docs.zkverify.io/)
-- [zkVerify Testnet Explorer](https://testnet-explorer.zkverify.io/)
+- [zkVerify Testnet Explorer](https://zkverify-testnet.subscan.io/) (Volta)
+- [zkVerify Mainnet Explorer](https://zkverify.subscan.io/)
 - [Circom Documentation](https://docs.circom.io/)
 - [SnarkJS Documentation](https://github.com/iden3/snarkjs)
-- [zkVerify Faucet](https://faucet.zkverify.io/)
+- [zkVerify Testnet Faucet](https://faucet.zkverify.io/)
+- [Ankr zkVerify RPC](https://www.ankr.com/web3-api/chains-list/zkverify/) (Recommended for production)

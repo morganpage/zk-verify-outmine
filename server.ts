@@ -4,6 +4,7 @@ import { zkVerifySession, Library, CurveType, VerifyTransactionInfo } from 'zkve
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
+import { getNetworkConfig, getSeedPhrase, Network } from './src/networkConfig';
 
 dotenv.config();
 
@@ -37,14 +38,19 @@ fastify.post('/verify-score', async (request: FastifyRequest<{ Body: VerifyScore
     try {
         fastify.log.info('Starting zkVerify submission...');
 
-        // 1. Initialize zkVerify Session (Backend context relies on the .env seed phrase)
-        const seedPhrase = process.env.ZKVERIFY_SEED_PHRASE;
-        if (!seedPhrase) {
-            throw new Error('ZKVERIFY_SEED_PHRASE not found in environment');
-        }
+        const networkConfig = getNetworkConfig();
+        const network: Network = (process.env.ZKVERIFY_NETWORK as Network) || 'testnet';
+
+        fastify.log.info(`Starting zkVerify submission to ${networkConfig.name}...`);
+
+        const seedPhrase = getSeedPhrase(network);
 
         const session = await zkVerifySession.start()
-            .Volta()
+            .Custom({
+                websocket: networkConfig.websocket,
+                rpc: networkConfig.rpc,
+                network: network === 'mainnet' ? 'zkVerify' : 'Volta'
+            })
             .withAccount(seedPhrase);
 
         // 2. Load the Verification Key
@@ -72,7 +78,7 @@ fastify.post('/verify-score', async (request: FastifyRequest<{ Body: VerifyScore
             success: true,
             message: 'Proof submitted to zkVerify',
             transactionHash: transactionInfo.txHash,
-            explorerUrl: `https://testnet-explorer.zkverify.io/vverify/transaction/${transactionInfo.txHash}`
+            explorerUrl: `${networkConfig.explorer}/vverify/transaction/${transactionInfo.txHash}`
         };
 
     } catch (error: any) {
