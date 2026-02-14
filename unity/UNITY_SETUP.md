@@ -41,6 +41,8 @@ Create an empty GameObject and attach `ZKProverBridge.cs` to it.
 
 ```csharp
 // Example: Submit score after game ends
+using System.Numerics;
+
 public class GameManager : MonoBehaviour
 {
     private int[] levelScores = new int[5];
@@ -49,8 +51,8 @@ public class GameManager : MonoBehaviour
 
     void Start()
     {
-        // Generate unique session ID for this game session
-        sessionId = System.Guid.NewGuid().ToString();
+        // Generate unique session ID for this game session (128-bit cryptographic uniqueness)
+        sessionId = BigInteger.Abs(new BigInteger(Guid.NewGuid().ToByteArray())).ToString();
         
         // Subscribe to proof generation events
         ZKProverBridge.Instance.OnProofGenerated += HandleProofGenerated;

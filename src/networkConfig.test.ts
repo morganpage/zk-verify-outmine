@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { getNetworkConfig, getSeedPhrase, NETWORKS, Network } from './networkConfig';
+import { getNetworkConfig, getSeedPhrase, NETWORKS, Network } from './networkConfig.js';
 
 describe('networkConfig', () => {
     const originalEnv = process.env;
