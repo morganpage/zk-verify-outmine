@@ -357,8 +357,19 @@
             let currentSession = null;
 
             // Initialize
-            document.getElementById('sessionId').value = Date.now().toString() + Math.floor(Math.random() * 1000).toString();
+            document.getElementById('sessionId').value = generateSessionId();
             updateTotal();
+
+            function generateSessionId() {
+                const bytes = new Uint8Array(16);
+                crypto.getRandomValues(bytes);
+                bytes[15] &= 0x7F;
+                let bigInt = 0n;
+                for (let i = 0; i < 16; i++) {
+                    bigInt = (bigInt << 8n) + BigInt(bytes[i]);
+                }
+                return bigInt.toString();
+            }
 
             document.querySelectorAll('.input-group input').forEach(input => {
                 input.addEventListener('input', updateTotal);
