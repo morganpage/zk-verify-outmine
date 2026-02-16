@@ -409,7 +409,11 @@ const start = async () => {
           retryDelay: QUEUE_RETRY_DELAY,
           timeout: QUEUE_TIMEOUT,
         },
-        (proof: any, publicSignals: any[], vk: any, network: any) => submitProofTransaction(proof, publicSignals, vk, network) as any
+        {
+          submit: async (proof: any, publicSignals: any[], vk: any, network: any) => {
+            return submitProofTransaction(proof, publicSignals, vk, network);
+          }
+        } as TransactionSubmitter
       );
 
       transactionQueue.on('processing', (data) => {
