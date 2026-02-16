@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { TransactionQueue, type TransactionResult } from '../transactionQueue.js';
+import { TransactionQueue, type TransactionResult } from '../zkTransactionQueue.js';
 
 describe('TransactionQueue', () => {
   let queue: TransactionQueue;

@@ -5,8 +5,8 @@ import type { zkVerifySession as ZkVerifySessionType } from "zkverifyjs";
 import dotenv from "dotenv";
 import { getNetworkConfig, getSeedPhrase, Network } from "./src/zkNetworkConfig.js";
 import { logFailure, categorizeError as categorizeZkError } from "./src/utils/zkFailureLogger.js";
-import { TransactionQueue, type TransactionResult } from "./src/transactionQueue.js";
-import { sanitizeProofData, validateProofAndSignals, categorizeTransactionError } from "./src/transactionUtils.js";
+import { TransactionQueue, type TransactionResult } from "./src/zkTransactionQueue.js";
+import { sanitizeProofData, validateProofAndSignals, categorizeTransactionError } from "./src/zkTransactionUtils.js";
 
 dotenv.config();
 
