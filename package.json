@@ -12,8 +12,10 @@
     "verify:mainnet": "ZKVERIFY_NETWORK=mainnet node scripts/verify_score.js",
     "register:vk:testnet": "ZKVERIFY_NETWORK=testnet node scripts/register_vk.js",
     "register:vk:mainnet": "ZKVERIFY_NETWORK=mainnet node scripts/register_vk.js",
+    "check:account:testnet": "ZKVERIFY_NETWORK=testnet node scripts/check_account.js",
+    "check:account:mainnet": "ZKVERIFY_NETWORK=mainnet node scripts/check_account.js",
     "build": "tsc",
-    "test:unit": "vitest run src/zkNetworkConfig.test.ts",
+    "test:unit": "vitest run src/zkNetworkConfig.test.ts src/__tests__/transactionQueue.test.ts",
     "test:integration": "vitest run src/__tests__/server.test.ts",
     "test:all": "vitest run"
   },

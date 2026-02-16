@@ -1563,6 +1563,110 @@ async function handleZkVerifyFinalization(transactionHash, publicSignals) {
 }
 ```
 
+## Transaction Queue Management
+
+### Overview
+
+The server includes a built-in transaction queue system to prevent nonce conflicts and handle transaction replacement automatically. This addresses the common issue of `1014: Priority is too low` errors when multiple proof submissions are made simultaneously.
+
+### Problem: Nonce Conflicts
+
+zkVerify uses nonces to prevent transaction replay attacks. When multiple transactions are submitted with the same nonce before the first one finalizes, you get:
+
+```
+1014: Priority is too low: (381 vs 381)
+The transaction has too low priority to replace another transaction already in the pool.
+```
+
+### Solution: Transaction Queue
+
+The queue system:
+
+1. **Serializes submissions** - Only one transaction in-flight at a time
+2. **Auto-retries on conflicts** - Detects nonce conflicts and retries with incremented nonce
+3. **Handles network issues** - Exponential backoff for transient failures
+4. **Provides visibility** - `/queue-status` endpoint for monitoring
+
+### Configuration
+
+Configure the queue via environment variables in `.env`:
+
+```bash
+# Transaction Queue Configuration
+QUEUE_MAX_CONCURRENT=1           # Maximum concurrent transactions (default: 1)
+QUEUE_RETRY_ATTEMPTS=3           # Max retry attempts for failed transactions (default: 3)
+QUEUE_RETRY_DELAY=5000            # Delay between retries in milliseconds (default: 5000)
+QUEUE_TIMEOUT=300000             # Timeout for stuck transactions (default: 300000 = 5min)
+```
+
+### Monitoring
+
+Check queue status anytime:
+
+```bash
+curl http://localhost:3000/queue-status
+```
+
+Response:
+```json
+{
+  "queueLength": 2,
+  "activeTransaction": {
+    "id": "tx_1234567890_abc123",
+    "txHash": "0x123...",
+    "timestamp": 1704067200000,
+    "retryCount": 0,
+    "status": "in-block"
+  },
+  "lastCompletedTimestamp": 1704067100000,
+  "totalProcessed": 15,
+  "totalFailed": 1,
+  "uptime": 3600.123
+}
+```
+
+### Queue Events
+
+The queue emits useful events for monitoring:
+
+- `enqueued` - Transaction added to queue
+- `processing` - Transaction currently being submitted
+- `completed` - Transaction successfully finalized
+- `failed` - Transaction failed (non-retryable)
+- `retry` - Transaction being retried after conflict
+- `queueCleared` - Queue was manually cleared
+
+### Emergency Operations
+
+If a transaction gets stuck:
+
+```bash
+# Option 1: Wait for timeout (5 minutes by default)
+# Option 2: Restart server - clears queue gracefully
+# Option 3: Implement admin endpoint to clear queue
+```
+
+### Best Practices
+
+1. **Keep QUEUE_MAX_CONCURRENT = 1** - Prevents nonce conflicts
+2. **Monitor queue status** - Catch stuck transactions early
+3. **Use registered VKs** - Faster, smaller transactions reduce conflict window
+4. **Configure appropriate timeouts** - Balance between patience and promptness
+5. **Watch for failed transactions** - Investigate persistent failures
+
+### Integration Notes
+
+The queue is integrated into `server.ts` automatically. When you call `/verify-score`:
+
+1. Request is validated
+2. Transaction is queued
+3. Queue processes serially
+4. On nonce conflict: auto-retry with incremented nonce
+5. On success: return transaction hash
+6. On failure: log error and move to next
+
+No changes needed to your client code - the queue handles everything transparently.
+
 ## How it Works
 
 The circuit ensures that the five hidden `scores` sum up exactly to the public `claimedTotal`. Any attempt to spoof the total without matching individual level scores will fail the ZK constraint. Once verified by zkVerify, you get a cryptographic attestation that the score is valid.

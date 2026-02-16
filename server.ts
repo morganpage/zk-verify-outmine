@@ -4,7 +4,9 @@ import { zkVerifySession, Library, CurveType, VerifyTransactionInfo } from "zkve
 import type { zkVerifySession as ZkVerifySessionType } from "zkverifyjs";
 import dotenv from "dotenv";
 import { getNetworkConfig, getSeedPhrase, Network } from "./src/zkNetworkConfig.js";
-import { logFailure, categorizeError } from "./src/utils/zkFailureLogger.js";
+import { logFailure, categorizeError as categorizeZkError } from "./src/utils/zkFailureLogger.js";
+import { TransactionQueue, type TransactionResult } from "./src/transactionQueue.js";
+import { sanitizeProofData, validateProofAndSignals, categorizeTransactionError } from "./src/transactionUtils.js";
 
 dotenv.config();
 
@@ -17,6 +19,13 @@ const MAX_RECONNECTION_ATTEMPTS = 10;
 const BASE_RECONNECT_DELAY = 1000;
 
 let disconnectCleanup: (() => void) | null = null;
+
+const QUEUE_MAX_CONCURRENT = parseInt(process.env.QUEUE_MAX_CONCURRENT || '1', 10);
+const QUEUE_RETRY_ATTEMPTS = parseInt(process.env.QUEUE_RETRY_ATTEMPTS || '3', 10);
+const QUEUE_RETRY_DELAY = parseInt(process.env.QUEUE_RETRY_DELAY || '5000', 10);
+const QUEUE_TIMEOUT = parseInt(process.env.QUEUE_TIMEOUT || '300000', 10);
+
+let transactionQueue: TransactionQueue | null = null;
 
 async function initializeZkSession(): Promise<ZkVerifySessionType> {
   const networkConfig = getNetworkConfig();
@@ -113,6 +122,43 @@ function monitorSessionConnection(): void {
   fastify.log.info('👁️ Session connection monitoring enabled');
 }
 
+async function submitProofTransaction(
+  proof: any,
+  publicSignals: any[],
+  registeredVkHash: string
+): Promise<TransactionResult> {
+  if (!zkSession || !zkSession.provider.isConnected) {
+    throw new Error('zkVerify session not available');
+  }
+
+  const networkConfig = getNetworkConfig();
+  fastify.log.info("Submitting proof to zkVerify...");
+
+  const { transactionResult } = await zkSession
+    .verify()
+    .groth16({
+      library: Library.snarkjs,
+      curve: CurveType.bn128,
+    })
+    .withRegisteredVk()
+    .execute({
+      proofData: {
+        proof: proof,
+        publicSignals: publicSignals,
+        vk: registeredVkHash,
+      },
+    });
+
+  const transactionInfo = (await transactionResult) as VerifyTransactionInfo;
+  fastify.log.info(`Transaction submitted: ${transactionInfo.txHash}`);
+
+  return {
+    success: true,
+    txHash: transactionInfo.txHash,
+    explorerUrl: `${networkConfig.explorer}/vverify/transaction/${transactionInfo.txHash}`,
+  };
+}
+
 interface HealthCheckResponse {
   status: 'healthy' | 'degraded' | 'unhealthy';
   zkVerifyConnected: boolean;
@@ -120,6 +166,12 @@ interface HealthCheckResponse {
   reconnectionAttempts?: number;
   isReconnecting?: boolean;
   uptime: number;
+  queueStatus?: {
+    queueLength: number;
+    activeTransaction: any;
+    totalProcessed: number;
+    totalFailed: number;
+  };
 }
 
 fastify.get('/health', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -148,6 +200,16 @@ fastify.get('/health', async (request: FastifyRequest, reply: FastifyReply) => {
     response.isReconnecting = true;
   }
 
+  if (transactionQueue) {
+    const queueStatus = (transactionQueue as TransactionQueue).getStatus();
+    response.queueStatus = {
+      queueLength: queueStatus.queueLength,
+      activeTransaction: queueStatus.activeTransaction,
+      totalProcessed: queueStatus.totalProcessed,
+      totalFailed: queueStatus.totalFailed,
+    };
+  }
+
   const statusCode = status === 'healthy' ? 200 : 503;
 
   return reply.status(statusCode).send(response);
@@ -156,6 +218,23 @@ fastify.get('/health', async (request: FastifyRequest, reply: FastifyReply) => {
 // Register CORS
 fastify.register(cors, {
   origin: "*", // In production, restrict this to your game's domain
+});
+
+fastify.get('/queue-status', async (request: FastifyRequest, reply: FastifyReply) => {
+  if (!transactionQueue) {
+    return reply.status(503).send({ error: 'Transaction queue not initialized' });
+  }
+
+  const status = (transactionQueue as TransactionQueue).getStatus();
+
+  return reply.send({
+    queueLength: status.queueLength,
+    activeTransaction: status.activeTransaction,
+    lastCompletedTimestamp: status.lastCompletedTimestamp,
+    totalProcessed: status.totalProcessed,
+    totalFailed: status.totalFailed,
+    uptime: process.uptime(),
+  });
 });
 
 interface VerifyScoreBody {
@@ -174,7 +253,7 @@ interface VerifyScoreBody {
 fastify.post("/verify-score", async (request: FastifyRequest<{ Body: VerifyScoreBody }>, reply: FastifyReply) => {
   let { proof, publicSignals } = request.body;
 
-  proof = typeof proof === "string" ? JSON.parse(proof) : proof;
+  proof = sanitizeProofData(proof);
 
   console.log("Proof", proof);
   console.log("publicSignals", publicSignals);
@@ -185,15 +264,16 @@ fastify.post("/verify-score", async (request: FastifyRequest<{ Body: VerifyScore
       ? process.env.REGISTERED_VK_HASH_TESTNET
       : process.env.REGISTERED_VK_HASH_MAINNET;
 
-  if (!proof || !publicSignals) {
+  const validation = validateProofAndSignals(proof, publicSignals);
+  if (!validation.valid) {
     logFailure({
       type: "VALIDATION_ERROR",
       proof: null,
       publicSignals: publicSignals || [],
-      error: new Error("Missing proof or publicSignals"),
+      error: new Error(validation.error || "Invalid proof or publicSignals"),
       network
     });
-    return reply.status(400).send({ error: "Missing proof or publicSignals" });
+    return reply.status(400).send({ error: validation.error || "Invalid proof or publicSignals" });
   }
 
   if (!registeredVkHash) {
@@ -210,6 +290,14 @@ fastify.post("/verify-score", async (request: FastifyRequest<{ Body: VerifyScore
   }
 
   try {
+    if (!transactionQueue) {
+      fastify.log.error("Transaction queue not initialized");
+      return reply.status(503).send({
+        success: false,
+        error: "Service unavailable - transaction queue not initialized"
+      });
+    }
+
     if (!zkSession || !zkSession.provider.isConnected) {
       if (isReconnecting) {
         fastify.log.warn("zkVerify session is reconnecting, request queued...");
@@ -232,35 +320,29 @@ fastify.post("/verify-score", async (request: FastifyRequest<{ Body: VerifyScore
 
     const networkConfig = getNetworkConfig();
 
-    fastify.log.info("Submitting proof to zkVerify...");
+    fastify.log.info("Submitting proof to transaction queue...");
 
-    const { transactionResult } = await zkSession
-      .verify()
-      .groth16({
-        library: Library.snarkjs,
-        curve: CurveType.bn128,
-      })
-      .withRegisteredVk()
-      .execute({
-        proofData: {
-          proof: proof,
-          publicSignals: publicSignals,
-          vk: registeredVkHash,
-        },
-      });
+    const queueStatus = (transactionQueue as TransactionQueue).getStatus();
 
-    const transactionInfo = (await transactionResult) as VerifyTransactionInfo;
-    fastify.log.info(`Transaction submitted: ${transactionInfo.txHash}`);
+    const result = await (transactionQueue as TransactionQueue).submit(
+      proof,
+      publicSignals,
+      registeredVkHash
+    );
+
+    fastify.log.info(`Proof submission completed: ${result.success ? 'success' : 'failed'}`);
 
     return {
       success: true,
       message: "Proof submitted to zkVerify",
-      transactionHash: transactionInfo.txHash,
-      explorerUrl: `${networkConfig.explorer}/vverify/transaction/${transactionInfo.txHash}`,
+      transactionHash: result.txHash,
+      explorerUrl: result.explorerUrl,
+      queuePosition: queueStatus.queueLength + 1,
     };
   } catch (error: any) {
+    const errorType = categorizeTransactionError(error);
     logFailure({
-      type: categorizeError(error),
+      type: categorizeZkError(error),
       proof,
       publicSignals,
       error,
@@ -268,9 +350,20 @@ fastify.post("/verify-score", async (request: FastifyRequest<{ Body: VerifyScore
     });
 
     fastify.log.error(error);
+
+    if (errorType === 'TRANSACTION_ERROR' || errorType === 'NETWORK_ERROR') {
+      return reply.status(503).send({
+        success: false,
+        error: error.message,
+        errorType,
+        retryable: true,
+      });
+    }
+
     return reply.status(500).send({
       success: false,
       error: error.message,
+      errorType,
     });
   }
 });
@@ -281,6 +374,38 @@ const start = async () => {
     try {
       zkSession = await initializeZkSession();
       monitorSessionConnection();
+
+      transactionQueue = new TransactionQueue(
+        {
+          maxConcurrent: QUEUE_MAX_CONCURRENT,
+          retryAttempts: QUEUE_RETRY_ATTEMPTS,
+          retryDelay: QUEUE_RETRY_DELAY,
+          timeout: QUEUE_TIMEOUT,
+        },
+        submitProofTransaction as any
+      );
+
+      transactionQueue.on('processing', (data) => {
+        fastify.log.info(`Processing transaction ${data.id}, ${data.queueRemaining} in queue`);
+      });
+
+      transactionQueue.on('completed', (data) => {
+        fastify.log.info(`Transaction ${data.id} completed successfully`);
+      });
+
+      transactionQueue.on('failed', (data) => {
+        fastify.log.error(`Transaction ${data.id} failed:`, data.error);
+      });
+
+      transactionQueue.on('retry', (data) => {
+        fastify.log.warn(`Transaction ${data.id} retry ${data.retryCount}/${QUEUE_RETRY_ATTEMPTS}:`, data.error);
+      });
+
+      transactionQueue.on('queueCleared', (data) => {
+        fastify.log.info(`Queue cleared: ${data.cleared} items, active interrupted: ${data.activeInterrupted}`);
+      });
+
+      fastify.log.info('✅ Transaction queue initialized');
     } catch (error) {
       fastify.log.error('Failed to initialize zkVerify session at startup');
       throw error;
@@ -290,6 +415,7 @@ const start = async () => {
     await fastify.listen({ port, host: "0.0.0.0" });
     fastify.log.info(`Server listening on ${port}`);
     fastify.log.info(`Health check available at http://0.0.0.0:${port}/health`);
+    fastify.log.info(`Queue status available at http://0.0.0.0:${port}/queue-status`);
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
@@ -298,7 +424,17 @@ const start = async () => {
 
 async function shutdown() {
   fastify.log.info('Shutting down gracefully...');
-  
+
+  if (transactionQueue) {
+    try {
+      fastify.log.info('Shutting down transaction queue...');
+      await transactionQueue.shutdown();
+      fastify.log.info('✅ Transaction queue shut down');
+    } catch (error) {
+      fastify.log.error('Error shutting down transaction queue:', error as any);
+    }
+  }
+
   if (zkSession) {
     try {
       fastify.log.info('Closing zkVerify session...');
@@ -308,11 +444,11 @@ async function shutdown() {
       fastify.log.error('Error closing zkVerify session:', error as any);
     }
   }
-  
+
   if (disconnectCleanup) {
     disconnectCleanup();
   }
-  
+
   process.exit(0);
 }
 
