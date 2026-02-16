@@ -139,7 +139,7 @@ Events are returned from both `verify()` and `batchVerify()` methods:
 ```typescript
 import { zkVerifySession, Library, CurveType } from 'zkverifyjs';
 import { ZkVerifyEvents } from 'zkverifyjs';
-import { getNetworkConfig, getSeedPhrase, Network } from './src/networkConfig';
+import { getNetworkConfig, getSeedPhrase, Network } from './src/zkNetworkConfig';
 
 const networkConfig = getNetworkConfig();
 const network: Network = (process.env.ZKVERIFY_NETWORK as Network) || 'testnet';
@@ -286,7 +286,7 @@ Use the `session.subscribe()` method to listen for specific events:
 ```typescript
 import { zkVerifySession, ZkVerifyEvents } from 'zkverifyjs';
 import dotenv from 'dotenv';
-import { getNetworkConfig, getSeedPhrase, Network } from './src/networkConfig';
+import { getNetworkConfig, getSeedPhrase, Network } from './src/zkNetworkConfig';
 dotenv.config();
 
 async function setupLeaderboardMonitor() {
@@ -879,7 +879,7 @@ Use `registerVerificationKey()` method to upload your VK to zkVerify:
 
 ```typescript
 import { zkVerifySession, Library, CurveType } from 'zkverifyjs';
-import { getNetworkConfig, getSeedPhrase, Network } from './src/networkConfig';
+import { getNetworkConfig, getSeedPhrase, Network } from './src/zkNetworkConfig';
 import dotenv from 'dotenv';
 import fs from 'fs';
 dotenv.config();
@@ -977,7 +977,7 @@ fastify.post('/verify-score', async (request, reply) => {
 
 ```typescript
 import { zkVerifySession, Library, CurveType } from 'zkverifyjs';
-import { getNetworkConfig, getSeedPhrase, Network } from './src/networkConfig';
+import { getNetworkConfig, getSeedPhrase, Network } from './src/zkNetworkConfig';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';

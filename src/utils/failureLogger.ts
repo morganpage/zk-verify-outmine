@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { Network } from "../networkConfig.js";
+import { Network } from "../zkNetworkConfig.js";
 
 type FailureType = "VALIDATION_ERROR" | "SUBMISSION_ERROR" | "VERIFICATION_FAILED" | "TRANSACTION_ERROR" | "NETWORK_ERROR" | "UNKNOWN_ERROR";
 

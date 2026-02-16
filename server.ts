@@ -5,7 +5,7 @@ import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
-import { getNetworkConfig, getSeedPhrase, Network } from "./src/networkConfig.js";
+import { getNetworkConfig, getSeedPhrase, Network } from "./src/zkNetworkConfig.js";
 import { logFailure, categorizeError } from "./src/utils/failureLogger.js";
 
 dotenv.config();
