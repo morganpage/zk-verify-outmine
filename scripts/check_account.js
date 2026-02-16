@@ -5,7 +5,7 @@ import { zkVerifySession, Library, CurveType } from "zkverifyjs";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { getCurrentNonce, isNonceConflictError } from "../src/transactionUtils.js";
+import { getCurrentNonce, isNonceConflictError } from "../dist/src/transactionUtils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
