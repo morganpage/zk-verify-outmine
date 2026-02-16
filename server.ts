@@ -3,9 +3,11 @@ import cors from "@fastify/cors";
 import { zkVerifySession, Library, CurveType, VerifyTransactionInfo } from "zkverifyjs";
 import type { zkVerifySession as ZkVerifySessionType } from "zkverifyjs";
 import dotenv from "dotenv";
+import fs from "fs";
+import path from "path";
 import { getNetworkConfig, getSeedPhrase, Network } from "./src/zkNetworkConfig.js";
 import { logFailure, categorizeError as categorizeZkError } from "./src/utils/zkFailureLogger.js";
-import { TransactionQueue, type TransactionResult } from "./src/zkTransactionQueue.js";
+import { TransactionQueue, type TransactionResult, type TransactionSubmitter } from "./src/zkTransactionQueue.js";
 import { sanitizeProofData, validateProofAndSignals, categorizeTransactionError } from "./src/zkTransactionUtils.js";
 
 dotenv.config();
@@ -26,6 +28,43 @@ const QUEUE_RETRY_DELAY = parseInt(process.env.QUEUE_RETRY_DELAY || '5000', 10);
 const QUEUE_TIMEOUT = parseInt(process.env.QUEUE_TIMEOUT || '300000', 10);
 
 let transactionQueue: TransactionQueue | null = null;
+
+export type VerificationKeyType = 'registered' | 'inline';
+
+export interface CachedVK {
+  type: VerificationKeyType;
+  data: string | any;
+  hash?: string;
+  network?: Network;
+}
+
+let cachedVK: CachedVK | null = null;
+
+async function loadVerificationKey(network: Network): Promise<CachedVK> {
+  const registeredVkHash = network === 'testnet'
+      ? process.env.REGISTERED_VK_HASH_TESTNET
+      : process.env.REGISTERED_VK_HASH_MAINNET;
+
+  if (registeredVkHash && registeredVkHash.length > 0) {
+    fastify.log.info(`Using registered VK hash for ${network}`);
+    return {
+      type: 'registered',
+      data: registeredVkHash,
+      hash: registeredVkHash,
+      network,
+    };
+  }
+
+  fastify.log.info(`No registered VK hash for ${network}, loading verification_key.json as fallback`);
+  const vkeyPath = path.join(process.cwd(), 'verification_key.json');
+  const vkey = JSON.parse(fs.readFileSync(vkeyPath, 'utf8'));
+
+  return {
+    type: 'inline',
+    data: vkey,
+    network,
+  };
+}
 
 async function initializeZkSession(): Promise<ZkVerifySessionType> {
   const networkConfig = getNetworkConfig();
@@ -125,7 +164,8 @@ function monitorSessionConnection(): void {
 async function submitProofTransaction(
   proof: any,
   publicSignals: any[],
-  registeredVkHash: string
+  vk: CachedVK,
+  network: Network
 ): Promise<TransactionResult> {
   if (!zkSession || !zkSession.provider.isConnected) {
     throw new Error('zkVerify session not available');
@@ -140,12 +180,11 @@ async function submitProofTransaction(
       library: Library.snarkjs,
       curve: CurveType.bn128,
     })
-    .withRegisteredVk()
     .execute({
       proofData: {
         proof: proof,
         publicSignals: publicSignals,
-        vk: registeredVkHash,
+        vk: vk.data,
       },
     });
 
@@ -260,10 +299,6 @@ fastify.post("/verify-score", async (request: FastifyRequest<{ Body: VerifyScore
 
   const network: Network = (process.env.ZKVERIFY_NETWORK as Network) || "testnet";
 
-  const registeredVkHash = network === "testnet"
-      ? process.env.REGISTERED_VK_HASH_TESTNET
-      : process.env.REGISTERED_VK_HASH_MAINNET;
-
   const validation = validateProofAndSignals(proof, publicSignals);
   if (!validation.valid) {
     logFailure({
@@ -274,19 +309,6 @@ fastify.post("/verify-score", async (request: FastifyRequest<{ Body: VerifyScore
       network
     });
     return reply.status(400).send({ error: validation.error || "Invalid proof or publicSignals" });
-  }
-
-  if (!registeredVkHash) {
-    logFailure({
-      type: "VALIDATION_ERROR",
-      proof: null,
-      publicSignals: [],
-      error: new Error(`REGISTERED_VK_HASH_${network.toUpperCase()} not set in environment`),
-      network
-    });
-    return reply.status(500).send({
-      error: `Server misconfigured: REGISTERED_VK_HASH_${network.toUpperCase()} not set. Run 'npm run register:vk:${network}' first.`
-    });
   }
 
   try {
@@ -327,7 +349,8 @@ fastify.post("/verify-score", async (request: FastifyRequest<{ Body: VerifyScore
     const result = await (transactionQueue as TransactionQueue).submit(
       proof,
       publicSignals,
-      registeredVkHash
+      cachedVK!,
+      network
     );
 
     fastify.log.info(`Proof submission completed: ${result.success ? 'success' : 'failed'}`);
@@ -375,6 +398,10 @@ const start = async () => {
       zkSession = await initializeZkSession();
       monitorSessionConnection();
 
+      const network: Network = (process.env.ZKVERIFY_NETWORK as Network) || "testnet";
+      cachedVK = await loadVerificationKey(network);
+      fastify.log.info(`Loaded VK type: ${cachedVK.type}, hash: ${cachedVK.hash || 'inline (full VK object)'}`);
+
       transactionQueue = new TransactionQueue(
         {
           maxConcurrent: QUEUE_MAX_CONCURRENT,
@@ -382,7 +409,7 @@ const start = async () => {
           retryDelay: QUEUE_RETRY_DELAY,
           timeout: QUEUE_TIMEOUT,
         },
-        submitProofTransaction as any
+        (proof: any, publicSignals: any[], vk: any, network: any) => submitProofTransaction(proof, publicSignals, vk, network) as any
       );
 
       transactionQueue.on('processing', (data) => {

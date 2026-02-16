@@ -40,7 +40,7 @@ describe('TransactionQueue', () => {
       };
       mockSubmitter.submit.mockResolvedValue(mockResult);
 
-      const result = await queue.submit('proof', ['signal'], 'vk-hash');
+      const result = await queue.submit('proof', ['signal'], { type: 'registered' as const, data: 'vk-hash' }, 'testnet');
 
       expect(result).toEqual(mockResult);
       expect(mockSubmitter.submit).toHaveBeenCalledTimes(1);
@@ -49,7 +49,7 @@ describe('TransactionQueue', () => {
     it('should reject if queue is shutting down', async () => {
       await queue.shutdown();
 
-      await expect(queue.submit('proof', ['signal'], 'vk-hash')).rejects.toThrow(
+      await expect(queue.submit('proof', ['signal'], { type: 'registered' as const, data: 'vk-hash' }, 'testnet')).rejects.toThrow(
         'Queue is shutting down'
       );
     });
@@ -66,7 +66,48 @@ describe('TransactionQueue', () => {
       expect(status).toHaveProperty('totalFailed');
     });
 
-    it('should clear the queue', () => {
+    it('should clear queue', () => {
+      const result = queue.clearQueue();
+
+      expect(result.cleared).toBeGreaterThanOrEqual(0);
+      expect(result.activeInterrupted).toBe(false);
+
+      const status = queue.getStatus();
+      expect(status.queueLength).toBe(0);
+    });
+  });
+
+  describe('shutdown', () => {
+    it('should shutdown gracefully', async () => {
+      await queue.shutdown();
+
+      const status = queue.getStatus();
+
+      expect(status.queueLength).toBe(0);
+      expect(status.activeTransaction).toBeNull();
+    });
+
+    it('should reject if queue is shutting down', async () => {
+      await queue.shutdown();
+
+      await expect(queue.submit('proof', ['signal'], { type: 'registered' as const, data: 'vk-hash' }, 'testnet')).rejects.toThrow(
+        'Queue is shutting down'
+      );
+    });
+  });
+
+  describe('queue management', () => {
+    it('should provide queue status', () => {
+      const status = queue.getStatus();
+
+      expect(status).toHaveProperty('queueLength');
+      expect(status).toHaveProperty('activeTransaction');
+      expect(status).toHaveProperty('lastCompletedTimestamp');
+      expect(status).toHaveProperty('totalProcessed');
+      expect(status).toHaveProperty('totalFailed');
+    });
+
+    it('should clear queue', () => {
       const result = queue.clearQueue();
 
       expect(result.cleared).toBeGreaterThanOrEqual(0);
@@ -91,7 +132,7 @@ describe('TransactionQueue', () => {
       await queue.shutdown();
 
       await expect(
-        queue.submit('proof', ['signal'], 'vk-hash')
+        queue.submit('proof', ['signal'], { type: 'registered' as const, data: 'vk-hash' }, 'testnet')
       ).rejects.toThrow('Queue is shutting down');
     });
   });
@@ -107,7 +148,7 @@ describe('TransactionQueue', () => {
         explorerUrl: 'https://example.com/0x123',
       });
 
-      await queue.submit('proof', ['signal'], 'vk-hash');
+      await queue.submit('proof', ['signal'], { type: 'registered' as const, data: 'vk-hash' }, 'testnet');
 
       expect(enqueuedHandler).toHaveBeenCalled();
     });
@@ -122,7 +163,7 @@ describe('TransactionQueue', () => {
         explorerUrl: 'https://example.com/0x123',
       });
 
-      await queue.submit('proof', ['signal'], 'vk-hash');
+      await queue.submit('proof', ['signal'], { type: 'registered' as const, data: 'vk-hash' }, 'testnet');
 
       expect(completedHandler).toHaveBeenCalled();
     });
@@ -133,7 +174,7 @@ describe('TransactionQueue', () => {
 
       mockSubmitter.submit.mockRejectedValue(new Error('Test error'));
 
-      await expect(queue.submit('proof', ['signal'], 'vk-hash')).rejects.toThrow();
+      await expect(queue.submit('proof', ['signal'], { type: 'registered' as const, data: 'vk-hash' }, 'testnet')).rejects.toThrow();
 
       expect(failedHandler).toHaveBeenCalled();
     });

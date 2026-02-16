@@ -4,7 +4,12 @@ export interface QueueItem {
   id: string;
   proof: any;
   publicSignals: any[];
-  registeredVkHash: string;
+  vk: {
+    type: "registered" | "inline";
+    data: string | any;
+    hash?: string;
+  };
+  network: "testnet" | "mainnet";
   timestamp: number;
   retryCount: number;
   maxRetries: number;
@@ -40,11 +45,16 @@ export interface TransactionResult {
   explorerUrl?: string;
 }
 
-interface TransactionSubmitter {
+export interface TransactionSubmitter {
   submit: (
     proof: any,
     publicSignals: any[],
-    registeredVkHash: string
+    vk: {
+      type: "registered" | "inline";
+      data: string | any;
+      hash?: string;
+    },
+    network: "testnet" | "mainnet"
   ) => Promise<TransactionResult>;
 }
 
@@ -88,7 +98,12 @@ export class TransactionQueue extends EventEmitter {
   async submit(
     proof: any,
     publicSignals: any[],
-    registeredVkHash: string,
+    vk: {
+      type: 'registered' | 'inline';
+      data: string | any;
+      hash?: string;
+    },
+    network: 'testnet' | 'mainnet',
     timeout?: number
   ): Promise<TransactionResult> {
     if (this.isShuttingDown) {
@@ -101,7 +116,8 @@ export class TransactionQueue extends EventEmitter {
       id,
       proof,
       publicSignals,
-      registeredVkHash,
+      vk,
+      network,
       timestamp: Date.now(),
       retryCount: 0,
       maxRetries: this.config.retryAttempts,
@@ -188,7 +204,7 @@ export class TransactionQueue extends EventEmitter {
   }
 
   private async executeTransaction(item: QueueItem): Promise<TransactionResult> {
-    return await this.submitter.submit(item.proof, item.publicSignals, item.registeredVkHash);
+    return await this.submitter.submit(item.proof, item.publicSignals, item.vk, item.network);
   }
 
   private isNonceConflict(errorMessage: string): boolean {
