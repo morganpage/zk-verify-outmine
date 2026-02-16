@@ -6,6 +6,7 @@ import path from "path";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 import { getNetworkConfig, getSeedPhrase, Network } from "./src/networkConfig.js";
+import { logFailure, categorizeError } from "./src/utils/failureLogger.js";
 
 dotenv.config();
 
@@ -35,13 +36,21 @@ interface VerifyScoreBody {
 fastify.post("/verify-score", async (request: FastifyRequest<{ Body: VerifyScoreBody }>, reply: FastifyReply) => {
   let { proof, publicSignals } = request.body;
 
-  //important!!!!
   proof = typeof proof === "string" ? JSON.parse(proof) : proof;
 
   console.log("Proof", proof);
   console.log("publicSignals", publicSignals);
 
+  const network: Network = (process.env.ZKVERIFY_NETWORK as Network) || "testnet";
+
   if (!proof || !publicSignals) {
+    logFailure({
+      type: "VALIDATION_ERROR",
+      proof: null,
+      publicSignals: publicSignals || [],
+      error: new Error("Missing proof or publicSignals"),
+      network
+    });
     return reply.status(400).send({ error: "Missing proof or publicSignals" });
   }
 
@@ -49,7 +58,6 @@ fastify.post("/verify-score", async (request: FastifyRequest<{ Body: VerifyScore
     fastify.log.info("Starting zkVerify submission...");
 
     const networkConfig = getNetworkConfig();
-    const network: Network = (process.env.ZKVERIFY_NETWORK as Network) || "testnet";
 
     fastify.log.info(`Starting zkVerify submission to ${networkConfig.name}...`);
 
@@ -93,6 +101,14 @@ fastify.post("/verify-score", async (request: FastifyRequest<{ Body: VerifyScore
       explorerUrl: `${networkConfig.explorer}/vverify/transaction/${transactionInfo.txHash}`,
     };
   } catch (error: any) {
+    logFailure({
+      type: categorizeError(error),
+      proof,
+      publicSignals,
+      error,
+      network
+    });
+
     fastify.log.error(error);
     return reply.status(500).send({
       success: false,

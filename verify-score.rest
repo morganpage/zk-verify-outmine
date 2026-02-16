@@ -1,0 +1,17 @@
+### Post verify-score
+POST http://localhost:3000/verify-score
+Content-Type: application/json
+
+{
+  "proof": {{$dotenv proof_json}},
+  "publicSignals": {{$dotenv public_signals_json}}
+}
+
+### Post verify-score - should fail
+POST http://localhost:3000/verify-score
+Content-Type: application/json
+
+{
+  "proof": {{$dotenv proof_json}},
+  "publicSignals": {{$dotenv public_signals_json_fail}}
+}
