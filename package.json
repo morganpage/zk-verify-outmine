@@ -10,6 +10,8 @@
     "dev:mainnet": "ZKVERIFY_NETWORK=mainnet npm run dev",
     "verify:testnet": "ZKVERIFY_NETWORK=testnet node scripts/verify_score.js",
     "verify:mainnet": "ZKVERIFY_NETWORK=mainnet node scripts/verify_score.js",
+    "register:vk:testnet": "ZKVERIFY_NETWORK=testnet node scripts/register_vk.js",
+    "register:vk:mainnet": "ZKVERIFY_NETWORK=mainnet node scripts/register_vk.js",
     "build": "tsc",
     "test:unit": "vitest run src/zkNetworkConfig.test.ts",
     "test:integration": "vitest run src/__tests__/server.test.ts",

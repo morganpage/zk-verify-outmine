@@ -865,209 +865,203 @@ Compiles TypeScript to JavaScript in `dist/` directory.
 
 ## Verification Key Registration
 
-By default, this project includes the full verification key with each proof submission. For production applications with high volume, you can **register your verification key on-chain** to reduce transaction costs and improve performance.
+This project supports two approaches for verification keys:
 
-### When to Register Your VK
+### Approach 1: Registered VK (Recommended for Production)
+**Register your verification key on-chain** to reduce transaction costs and eliminate file I/O during proof submission.
 
-- **Development/Testing**: Not necessary - submit VK inline
-- **Low-volume apps**: Optional - inline submission works fine
-- **High-volume games**: Recommended - register once, submit many proofs with hash reference
+**Benefits:**
+- ✅ No file I/O per request (faster)
+- ✅ Smaller transaction size (hash vs full VK)
+- ✅ Lower transaction costs
+- ✅ Better for high-volume applications
 
-### Registering the Verification Key
+**This is the default implementation in `server.ts`.**
 
-Use `registerVerificationKey()` method to upload your VK to zkVerify:
+### Approach 2: Inline VK (Development/Fallback)
+**Include full verification key with each proof submission.** Use this during development or for low-volume testing.
 
+**Benefits:**
+- ✅ No registration setup required
+- ✅ Simpler for initial development
+- ❌ File I/O per request
+- ❌ Larger transaction size
+- ❌ Higher transaction costs
+
+**Code example for inline VK approach (for reference only):**
 ```typescript
-import { zkVerifySession, Library, CurveType } from 'zkverifyjs';
-import { getNetworkConfig, getSeedPhrase, Network } from './src/zkNetworkConfig';
-import dotenv from 'dotenv';
-import fs from 'fs';
-dotenv.config();
+// Load VK from file system
+const vkeyPath = path.join(__dirname, 'verification_key.json');
+const vkey = JSON.parse(fs.readFileSync(vkeyPath, 'utf8'));
 
-async function setupRegisteredVK() {
-    const networkConfig = getNetworkConfig();
-    const network: Network = (process.env.ZKVERIFY_NETWORK as Network) || 'testnet';
-    const seedPhrase = getSeedPhrase(network);
-
-    // Start session
-const session = await zkVerifySession.start()
-    .Volta()
-    .withAccount(seedPhrase);
-
-// Load your verification key
-const vkey = JSON.parse(fs.readFileSync('verification_key.json', 'utf8'));
-
-// Register the verification key
-const { events, transactionResult } = await session
-    .registerVerificationKey()
-    .groth16({
-        library: Library.snarkjs,
-        curve: CurveType.bn128
-    })
-    .execute(vkey);
-
-// Wait for registration to complete
-const vkTransactionInfo = await transactionResult;
-console.log('✅ Verification Key Registered!');
-console.log('Statement Hash:', vkTransactionInfo.statementHash);
-console.log('View on Explorer:', `${networkConfig.explorer}/vverify/transaction/${vkTransactionInfo.txHash}`);
-```
-
-### Submitting Proofs with Registered VK
-
-Once registered, use `.withRegisteredVk()` and provide the `statementHash` instead of the full VK:
-
-```typescript
-// After registration, use the statement hash for all future proofs
-const { events, transactionResult } = await session
+// Submit without .withRegisteredVk()
+const { transactionResult } = await session
     .verify()
-    .groth16({
-        library: Library.snarkjs,
-        curve: CurveType.bn128
-    })
-    .withRegisteredVk() // Important: indicates VK is already registered
+    .groth16({ library: Library.snarkjs, curve: CurveType.bn128 })
     .execute({
         proofData: {
-            vk: vkTransactionInfo.statementHash, // Use hash, not full VK
+            proof: proof,
+            publicSignals: publicSignals,
+            vk: vkey,  // Full VK object, not hash
+        },
+    });
+```
+
+---
+
+### Registering the Verification Key (Approach 1)
+
+#### One-Time Setup
+
+**Step 1: Register VK on testnet:**
+```bash
+npm run register:vk:testnet
+```
+
+**Step 2: Copy the statement hash** from the output (format: `0xabc123...`)
+
+**Step 3: Add to your `.env` file:**
+```bash
+REGISTERED_VK_HASH_TESTNET="0xabc123..."
+```
+
+**Step 4: Repeat for mainnet when needed:**
+```bash
+npm run register:vk:mainnet
+# Add the resulting hash as REGISTERED_VK_HASH_MAINNET="..."
+```
+
+#### Registration Script Details
+
+The `scripts/register_vk.js` script:
+
+1. **Loads your verification key** from `verification_key.json`
+2. **Connects to zkVerify** (testnet or mainnet based on env var)
+3. **Registers the VK** on-chain using `registerVerificationKey().groth16().execute()`
+4. **Monitors events:** `includedInBlock`, `finalized`, `error`
+5. **Outputs:**
+   - Transaction hash
+   - **Statement hash** (save this to `.env`)
+   - Explorer link
+
+Example output:
+```
+📝 Registering verification key on Volta Testnet...
+📦 VK registration included in block: 0x123...
+✅ VK registration finalized!
+📋 Statement Hash: 0xabc123def456...
+🔗 Explorer: https://zkverify-testnet.subscan.io/vverify/transaction/0x789...
+
+💾 Add this to your .env:
+REGISTERED_VK_HASH_TESTNET="0xabc123def456..."
+```
+
+---
+
+### Server Implementation (Registered VK)
+
+The `server.ts` uses the registered VK approach:
+
+```typescript
+// Get network-specific registered VK hash
+const registeredVkHash = network === 'testnet'
+    ? process.env.REGISTERED_VK_HASH_TESTNET
+    : process.env.REGISTERED_VK_HASH_MAINNET;
+
+// Validate VK hash exists
+if (!registeredVkHash) {
+    return reply.status(500).send({
+        error: `REGISTERED_VK_HASH_${network.toUpperCase()} not set. Run 'npm run register:vk:${network}' first.`
+    });
+}
+
+// Submit proof with registered VK
+const { transactionResult } = await session
+    .verify()
+    .groth16({ library: Library.snarkjs, curve: CurveType.bn128 })
+    .withRegisteredVk()  // ← Use registered VK
+    .execute({
+        proofData: {
+            vk: registeredVkHash,  // ← Hash, not full VK
             proof: proof,
             publicSignals: publicSignals
         },
-        domainId: 0 // Optional domain ID for aggregation
     });
 ```
 
-### Benefits of VK Registration
+---
 
-| Benefit | Inline VK | Registered VK |
-|---------|-----------|---------------|
-| Transaction Size | Large (includes full VK) | Small (only hash reference) |
-| Transaction Cost | Higher | Lower |
-| Setup Complexity | None | One-time registration |
-| Use Case | Development, low volume | Production, high volume |
+### Benefits Comparison
 
-### Updating Your Server for Registered VKs
+| Feature | Registered VK | Inline VK |
+|---------|--------------|-----------|
+| File I/O | ❌ None | ✅ Reads per request |
+| Transaction Size | Small (hash only) | Large (full VK) |
+| Transaction Cost | Lower | Higher |
+| Setup | One-time registration | None |
+| Best For | Production, high volume | Development, testing |
+| Default in server.ts | ✅ Yes | ❌ No |
 
-Modify `server.ts` to support registered VKs:
-
-```typescript
-// In your server.ts, load the statement hash from environment or config
-const REGISTERED_VK_HASH = process.env.REGISTERED_VK_HASH; // e.g., "0xabc123..."
-
-fastify.post('/verify-score', async (request, reply) => {
-    const { proof, publicSignals } = request.body;
-
-    const session = await zkVerifySession.start().Volta().withAccount(seedPhrase);
-
-    const { transactionResult } = await session.verify()
-        .groth16({ library: Library.snarkjs, curve: CurveType.bn128 })
-        .withRegisteredVk() // Use registered VK
-        .execute({
-            proofData: {
-                vk: REGISTERED_VK_HASH, // Hash instead of full VK
-                proof: proof,
-                publicSignals: publicSignals
-            }
-        });
-
-    // ... rest of your logic
-});
-```
-
-### Complete Example: Register and Use VK
-
-```typescript
-import { zkVerifySession, Library, CurveType } from 'zkverifyjs';
-import { getNetworkConfig, getSeedPhrase, Network } from './src/zkNetworkConfig';
-import dotenv from 'dotenv';
-import fs from 'fs';
-import path from 'path';
-dotenv.config();
-
-async function setupRegisteredVK() {
-    const networkConfig = getNetworkConfig();
-    const network: Network = (process.env.ZKVERIFY_NETWORK as Network) || 'testnet';
-    const seedPhrase = getSeedPhrase(network);
-
-    // Start session
-    const session = await zkVerifySession.start()
-        .Custom({
-                websocket: networkConfig.websocket,
-                rpc: networkConfig.rpc,
-                network: network === 'mainnet' ? 'zkVerify' : 'Volta'
-            })
-        .withAccount(seedPhrase);
-
-    // Load verification key
-    const vkeyPath = path.join(__dirname, 'verification_key.json');
-    const vkey = JSON.parse(fs.readFileSync(vkeyPath, 'utf8'));
-
-    // Register VK
-    console.log('📝 Registering verification key...');
-    const { events, transactionResult } = await session
-        .registerVerificationKey()
-        .groth16({ library: Library.snarkjs, curve: CurveType.bn128 })
-        .execute(vkey);
-
-    // Listen for events
-    events.on('includedInBlock', (data) => {
-        console.log('📦 VK registration included in block:', data.blockHash);
-    });
-
-    events.on('finalized', (data) => {
-        console.log('✅ VK registration finalized!');
-        console.log('📋 Statement Hash:', data.statementHash);
-        console.log('🔗 Explorer:', `${networkConfig.explorer}/vverify/transaction/${data.txHash}`);
-    });
-
-    events.on('error', (error) => {
-        console.error('❌ Registration failed:', error);
-    });
-
-    // Wait for completion
-    const result = await transactionResult;
-
-    console.log('🎉 VK registered successfully!');
-    console.log('Statement hash:', result.statementHash);
-    console.log('Transaction hash:', result.txHash);
-
-    // Save the statement hash for future use
-    console.log('💾 Save this statement hash in your .env:');
-    console.log(`REGISTERED_VK_HASH="${result.statementHash}"`);
-
-    return result.statementHash;
-}
-
-// Run setup
-setupRegisteredVK().catch(console.error);
-```
+---
 
 ### Managing Multiple Verification Keys
 
 If your game uses different circuits for different modes:
 
+**Register each VK separately:**
+```bash
+npm run register:vk:testnet  # For easy mode circuit
+npm run register:vk:mainnet  # For hard mode circuit
+```
+
+**Store hashes in .env:**
+```bash
+REGISTERED_VK_HASH_EASY="0xabc..."
+REGISTERED_VK_HASH_HARD="0xdef..."
+```
+
+**Update server.ts to select by mode:**
 ```typescript
 const VK_HASHES = {
-    easyMode: process.env.VK_EASY,
-    hardMode: process.env.VK_HARD,
-    tournament: process.env.VK_TOURNAMENT
+    easy: process.env.REGISTERED_VK_HASH_EASY,
+    hard: process.env.REGISTERED_VK_HASH_HARD
 };
 
-async function submitProofWithVK(proof, publicSignals, mode) {
-    const vkHash = VK_HASHES[mode];
+const registeredVkHash = VK_HASHES[gameMode] || VK_HASHES.easy;
+```
 
-    const { transactionResult } = await session.verify()
-        .groth16({ library: Library.snarkjs, curve: CurveType.bn128 })
-        .withRegisteredVk()
-        .execute({
-            proofData: {
-                vk: vkHash,
-                proof: proof,
-                publicSignals: publicSignals
-            }
-        });
+---
 
-    return await transactionResult;
-}
+## Workflow Summary
+
+### For Developers
+
+1. **Initial Setup:**
+   ```bash
+   npm run register:vk:testnet  # Register VK on testnet
+   # Copy statement hash to .env as REGISTERED_VK_HASH_TESTNET
+   ```
+
+2. **Start Server:**
+   ```bash
+   npm run dev  # Uses REGISTERED_VK_HASH_TESTNET
+   ```
+
+3. **Production Deploy:**
+   ```bash
+   npm run register:vk:mainnet  # Register VK on mainnet
+   # Copy statement hash to .env as REGISTERED_VK_HASH_MAINNET
+   ZKVERIFY_NETWORK=mainnet npm run dev  # Uses mainnet VK hash
+   ```
+
+### Network Switching
+
+The server automatically selects the correct VK hash based on `ZKVERIFY_NETWORK`:
+
+```typescript
+const registeredVkHash = network === 'testnet'
+    ? process.env.REGISTERED_VK_HASH_TESTNET   // ← Used when ZKVERIFY_NETWORK=testnet
+    : process.env.REGISTERED_VK_HASH_MAINNET;  // ← Used when ZKVERIFY_NETWORK=mainnet
 ```
 
 ## Network Configuration
