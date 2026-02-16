@@ -6,7 +6,7 @@ import path from "path";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 import { getNetworkConfig, getSeedPhrase, Network } from "./src/zkNetworkConfig.js";
-import { logFailure, categorizeError } from "./src/utils/failureLogger.js";
+import { logFailure, categorizeError } from "./src/utils/zkFailureLogger.js";
 
 dotenv.config();
 

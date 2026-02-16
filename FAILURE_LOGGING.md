@@ -158,7 +158,7 @@ The failure logger is automatically integrated into the `/verify-score` endpoint
 
 To upgrade from console logging to MongoDB:
 
-1. Replace `console.log()` in `src/utils/failureLogger.ts` with MongoDB insert
+1. Replace `console.log()` in `src/utils/zkFailureLogger.ts` with MongoDB insert
 2. Add MongoDB connection to `server.ts`
 3. Create Mongoose schema matching the log structure
 4. No changes needed to the calling code in `server.ts`
