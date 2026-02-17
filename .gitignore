@@ -83,6 +83,12 @@ Thumbs.db
 .cursor-requests
 AGENTS.md
 
+# AI planning and tracking documents
+PHASE*.md
+AUDIT_*.md
+VK_*.md
+FAILURE_LOGGING.md
+
 
 # Test coverage
 coverage/
