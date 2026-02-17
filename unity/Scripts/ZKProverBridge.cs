@@ -84,27 +84,41 @@ public class ZKProverBridge : MonoBehaviour
   /// </summary>
   public void OnProofGeneratedCallback(string resultJson)
   {
-    JObject parsed = JObject.Parse(resultJson);
-
-    string proof = parsed["proof"].ToString();
-    string[] publicSignals = parsed["publicSignals"].ToObject<string[]>();
-    ZKProofResult result = new ZKProofResult
+    try
     {
-      proof = proof,
-      publicSignals = publicSignals
-    };
+      JObject parsed = JObject.Parse(resultJson);
 
-    OnProofGenerated?.Invoke(result);
+      string proof = parsed["proof"]?.ToString();
+      string[] publicSignals = parsed["publicSignals"]?.ToObject<string[]>();
+      ZKProofResult result = new ZKProofResult
+      {
+        proof = proof ?? string.Empty,
+        publicSignals = publicSignals ?? new string[0]
+      };
 
-    if (result.success)
-    {
-      Debug.Log($"[ZKProver] Proof generated successfully!");
-      Debug.Log($"[ZKProver] Proof: {result.proof}");
-      Debug.Log($"[ZKProver] Public Signals: {string.Join(", ", result.publicSignals)}");
+      OnProofGenerated?.Invoke(result);
+
+      if (!string.IsNullOrEmpty(result.proof))
+      {
+        Debug.Log($"[ZKProver] Proof generated successfully!");
+        Debug.Log($"[ZKProver] Proof: {result.proof}");
+        Debug.Log($"[ZKProver] Public Signals: {string.Join(", ", result.publicSignals)}");
+      }
+      else
+      {
+        Debug.LogError($"[ZKProver] Proof generation failed: {result.error}");
+      }
     }
-    else
+    catch (Exception e)
     {
-      Debug.LogError($"[ZKProver] Proof generation failed: {result.error}");
+      Debug.LogError($"[ZKProver] JSON parse error: {e.Message}");
+      OnProofGenerated?.Invoke(new ZKProofResult
+      {
+        success = false,
+        proof = string.Empty,
+        publicSignals = new string[0],
+        error = $"Invalid JSON: {e.Message}"
+      });
     }
   }
 
@@ -113,8 +127,21 @@ public class ZKProverBridge : MonoBehaviour
   /// </summary>
   public void OnProofVerifiedCallback(string resultJson)
   {
-    var result = JsonUtility.FromJson<ZKVerifyResult>(resultJson);
-    OnProofVerified?.Invoke(result);
+    try
+    {
+      var result = JsonUtility.FromJson<ZKVerifyResult>(resultJson);
+      OnProofVerified?.Invoke(result);
+    }
+    catch (Exception e)
+    {
+      Debug.LogError($"[ZKProver] Verification callback error: {e.Message}");
+      OnProofVerified?.Invoke(new ZKVerifyResult
+      {
+        success = false,
+        isValid = false,
+        error = $"Invalid JSON: {e.Message}"
+      });
+    }
   }
 }
 
