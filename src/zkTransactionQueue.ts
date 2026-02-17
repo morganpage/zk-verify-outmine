@@ -32,7 +32,6 @@ export interface ActiveTransactionInfo {
 }
 
 export interface QueueConfig {
-  maxConcurrent: number;
   retryAttempts: number;
   retryDelay: number;
   timeout: number;

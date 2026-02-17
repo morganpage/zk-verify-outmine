@@ -22,14 +22,13 @@ const BASE_RECONNECT_DELAY = 1000;
 
 let disconnectCleanup: (() => void) | null = null;
 
-const QUEUE_MAX_CONCURRENT = parseInt(process.env.QUEUE_MAX_CONCURRENT || '1', 10);
-const QUEUE_RETRY_ATTEMPTS = parseInt(process.env.QUEUE_RETRY_ATTEMPTS || '3', 10);
-const QUEUE_RETRY_DELAY = parseInt(process.env.QUEUE_RETRY_DELAY || '5000', 10);
-const QUEUE_TIMEOUT = parseInt(process.env.QUEUE_TIMEOUT || '300000', 10);
+const QUEUE_RETRY_ATTEMPTS = parseInt(process.env.QUEUE_RETRY_ATTEMPTS || "3", 10);
+const QUEUE_RETRY_DELAY = parseInt(process.env.QUEUE_RETRY_DELAY || "5000", 10);
+const QUEUE_TIMEOUT = parseInt(process.env.QUEUE_TIMEOUT || "300000", 10);
 
 let transactionQueue: TransactionQueue | null = null;
 
-export type VerificationKeyType = 'registered' | 'inline';
+export type VerificationKeyType = "registered" | "inline";
 
 export interface CachedVK {
   type: VerificationKeyType;
@@ -41,14 +40,12 @@ export interface CachedVK {
 let cachedVK: CachedVK | null = null;
 
 async function loadVerificationKey(network: Network): Promise<CachedVK> {
-  const registeredVkHash = network === 'testnet'
-      ? process.env.REGISTERED_VK_HASH_TESTNET
-      : process.env.REGISTERED_VK_HASH_MAINNET;
+  const registeredVkHash = network === "testnet" ? process.env.REGISTERED_VK_HASH_TESTNET : process.env.REGISTERED_VK_HASH_MAINNET;
 
   if (registeredVkHash && registeredVkHash.length > 0) {
     fastify.log.info(`Using registered VK hash for ${network}`);
     return {
-      type: 'registered',
+      type: "registered",
       data: registeredVkHash,
       hash: registeredVkHash,
       network,
@@ -56,11 +53,11 @@ async function loadVerificationKey(network: Network): Promise<CachedVK> {
   }
 
   fastify.log.info(`No registered VK hash for ${network}, loading verification_key.json as fallback`);
-  const vkeyPath = path.join(process.cwd(), 'verification_key.json');
-  const vkey = JSON.parse(fs.readFileSync(vkeyPath, 'utf8'));
+  const vkeyPath = path.join(process.cwd(), "verification_key.json");
+  const vkey = JSON.parse(fs.readFileSync(vkeyPath, "utf8"));
 
   return {
-    type: 'inline',
+    type: "inline",
     data: vkey,
     network,
   };
@@ -104,15 +101,12 @@ async function attemptReconnection(): Promise<void> {
 
   isReconnecting = true;
   reconnectionAttempts++;
-  
-  const delay = Math.min(
-    BASE_RECONNECT_DELAY * Math.pow(2, reconnectionAttempts - 1),
-    30000
-  );
+
+  const delay = Math.min(BASE_RECONNECT_DELAY * Math.pow(2, reconnectionAttempts - 1), 30000);
 
   fastify.log.warn(`Reconnection attempt ${reconnectionAttempts}/${MAX_RECONNECTION_ATTEMPTS} in ${delay}ms...`);
 
-  await new Promise(resolve => setTimeout(resolve, delay));
+  await new Promise((resolve) => setTimeout(resolve, delay));
 
   try {
     fastify.log.info("Attempting to reconnect to zkVerify...");
@@ -125,7 +119,7 @@ async function attemptReconnection(): Promise<void> {
   } catch (error) {
     fastify.log.error(`Reconnection attempt ${reconnectionAttempts} failed:`, error as any);
     isReconnecting = false;
-    
+
     setTimeout(() => attemptReconnection(), 0);
   }
 }
@@ -142,51 +136,54 @@ function monitorSessionConnection(): void {
     disconnectCleanup();
   }
 
-  disconnectCleanup = provider.on('disconnected', () => {
-    fastify.log.warn('⚠️ zkVerify WebSocket disconnected');
+  disconnectCleanup = provider.on("disconnected", () => {
+    fastify.log.warn("⚠️ zkVerify WebSocket disconnected");
     zkSession = null;
     attemptReconnection();
   });
 
-  disconnectCleanup = provider.on('error', (error: Error) => {
-    fastify.log.error('zkVerify provider error:', error as any);
+  disconnectCleanup = provider.on("error", (error: Error) => {
+    fastify.log.error("zkVerify provider error:", error as any);
   });
 
-  disconnectCleanup = provider.on('connected', () => {
-    fastify.log.info('✅ zkVerify WebSocket connected');
+  disconnectCleanup = provider.on("connected", () => {
+    fastify.log.info("✅ zkVerify WebSocket connected");
     reconnectionAttempts = 0;
     isReconnecting = false;
   });
 
-  fastify.log.info('👁️ Session connection monitoring enabled');
+  fastify.log.info("👁️ Session connection monitoring enabled");
 }
 
-async function submitProofTransaction(
-  proof: any,
-  publicSignals: any[],
-  vk: CachedVK,
-  network: Network
-): Promise<TransactionResult> {
+async function submitProofTransaction(proof: any, publicSignals: any[], vk: CachedVK, network: Network): Promise<TransactionResult> {
   if (!zkSession || !zkSession.provider.isConnected) {
-    throw new Error('zkVerify session not available');
+    throw new Error("zkVerify session not available");
   }
 
   const networkConfig = getNetworkConfig();
   fastify.log.info("Submitting proof to zkVerify...");
 
-  const { transactionResult } = await zkSession
+  let verifyBuilder = zkSession
     .verify()
     .groth16({
       library: Library.snarkjs,
       curve: CurveType.bn128,
-    })
-    .execute({
-      proofData: {
-        proof: proof,
-        publicSignals: publicSignals,
-        vk: vk.data,
-      },
     });
+
+  if (vk.type === 'registered') {
+    fastify.log.info('Using registered VK mode');
+    verifyBuilder = verifyBuilder.withRegisteredVk();
+  } else {
+    fastify.log.info('Using inline VK mode');
+  }
+
+  const { transactionResult } = await verifyBuilder.execute({
+    proofData: {
+      proof: proof,
+      publicSignals: publicSignals,
+      vk: vk.data,
+    },
+  });
 
   const transactionInfo = (await transactionResult) as VerifyTransactionInfo;
   fastify.log.info(`Transaction submitted: ${transactionInfo.txHash}`);
@@ -199,7 +196,7 @@ async function submitProofTransaction(
 }
 
 interface HealthCheckResponse {
-  status: 'healthy' | 'degraded' | 'unhealthy';
+  status: "healthy" | "degraded" | "unhealthy";
   zkVerifyConnected: boolean;
   network: string;
   reconnectionAttempts?: number;
@@ -213,18 +210,18 @@ interface HealthCheckResponse {
   };
 }
 
-fastify.get('/health', async (request: FastifyRequest, reply: FastifyReply) => {
+fastify.get("/health", async (request: FastifyRequest, reply: FastifyReply) => {
   const uptime = process.uptime();
   const network: Network = (process.env.ZKVERIFY_NETWORK as Network) || "testnet";
   const networkConfig = getNetworkConfig();
 
-  let status: 'healthy' | 'degraded' | 'unhealthy';
+  let status: "healthy" | "degraded" | "unhealthy";
   if (zkSession && zkSession.provider.isConnected) {
-    status = 'healthy';
+    status = "healthy";
   } else if (isReconnecting) {
-    status = 'degraded';
+    status = "degraded";
   } else {
-    status = 'unhealthy';
+    status = "unhealthy";
   }
 
   const response: HealthCheckResponse = {
@@ -249,7 +246,7 @@ fastify.get('/health', async (request: FastifyRequest, reply: FastifyReply) => {
     };
   }
 
-  const statusCode = status === 'healthy' ? 200 : 503;
+  const statusCode = status === "healthy" ? 200 : 503;
 
   return reply.status(statusCode).send(response);
 });
@@ -259,9 +256,9 @@ fastify.register(cors, {
   origin: "*", // In production, restrict this to your game's domain
 });
 
-fastify.get('/queue-status', async (request: FastifyRequest, reply: FastifyReply) => {
+fastify.get("/queue-status", async (request: FastifyRequest, reply: FastifyReply) => {
   if (!transactionQueue) {
-    return reply.status(503).send({ error: 'Transaction queue not initialized' });
+    return reply.status(503).send({ error: "Transaction queue not initialized" });
   }
 
   const status = (transactionQueue as TransactionQueue).getStatus();
@@ -294,9 +291,6 @@ fastify.post("/verify-score", async (request: FastifyRequest<{ Body: VerifyScore
 
   proof = sanitizeProofData(proof);
 
-  console.log("Proof", proof);
-  console.log("publicSignals", publicSignals);
-
   const network: Network = (process.env.ZKVERIFY_NETWORK as Network) || "testnet";
 
   const validation = validateProofAndSignals(proof, publicSignals);
@@ -306,7 +300,7 @@ fastify.post("/verify-score", async (request: FastifyRequest<{ Body: VerifyScore
       proof: null,
       publicSignals: publicSignals || [],
       error: new Error(validation.error || "Invalid proof or publicSignals"),
-      network
+      network,
     });
     return reply.status(400).send({ error: validation.error || "Invalid proof or publicSignals" });
   }
@@ -316,7 +310,7 @@ fastify.post("/verify-score", async (request: FastifyRequest<{ Body: VerifyScore
       fastify.log.error("Transaction queue not initialized");
       return reply.status(503).send({
         success: false,
-        error: "Service unavailable - transaction queue not initialized"
+        error: "Service unavailable - transaction queue not initialized",
       });
     }
 
@@ -326,16 +320,13 @@ fastify.post("/verify-score", async (request: FastifyRequest<{ Body: VerifyScore
         return reply.status(503).send({
           success: false,
           error: "Service temporarily unavailable - reconnecting to zkVerify",
-          retryAfter: Math.min(
-            BASE_RECONNECT_DELAY * Math.pow(2, reconnectionAttempts - 1),
-            30000
-          ) / 1000
+          retryAfter: Math.min(BASE_RECONNECT_DELAY * Math.pow(2, reconnectionAttempts - 1), 30000) / 1000,
         });
       } else {
         fastify.log.error("zkVerify session not available");
         return reply.status(503).send({
           success: false,
-          error: "Service unavailable - zkVerify session not initialized"
+          error: "Service unavailable - zkVerify session not initialized",
         });
       }
     }
@@ -346,14 +337,9 @@ fastify.post("/verify-score", async (request: FastifyRequest<{ Body: VerifyScore
 
     const queueStatus = (transactionQueue as TransactionQueue).getStatus();
 
-    const result = await (transactionQueue as TransactionQueue).submit(
-      proof,
-      publicSignals,
-      cachedVK!,
-      network
-    );
+    const result = await (transactionQueue as TransactionQueue).submit(proof, publicSignals, cachedVK!, network);
 
-    fastify.log.info(`Proof submission completed: ${result.success ? 'success' : 'failed'}`);
+    fastify.log.info(`Proof submission completed: ${result.success ? "success" : "failed"}`);
 
     return {
       success: true,
@@ -369,12 +355,12 @@ fastify.post("/verify-score", async (request: FastifyRequest<{ Body: VerifyScore
       proof,
       publicSignals,
       error,
-      network
+      network,
     });
 
     fastify.log.error(error);
 
-    if (errorType === 'TRANSACTION_ERROR' || errorType === 'NETWORK_ERROR') {
+    if (errorType === "TRANSACTION_ERROR" || errorType === "NETWORK_ERROR") {
       return reply.status(503).send({
         success: false,
         error: error.message,
@@ -400,11 +386,10 @@ const start = async () => {
 
       const network: Network = (process.env.ZKVERIFY_NETWORK as Network) || "testnet";
       cachedVK = await loadVerificationKey(network);
-      fastify.log.info(`Loaded VK type: ${cachedVK.type}, hash: ${cachedVK.hash || 'inline (full VK object)'}`);
+      fastify.log.info(`Loaded VK type: ${cachedVK.type}, hash: ${cachedVK.hash || "inline (full VK object)"}`);
 
       transactionQueue = new TransactionQueue(
         {
-          maxConcurrent: QUEUE_MAX_CONCURRENT,
           retryAttempts: QUEUE_RETRY_ATTEMPTS,
           retryDelay: QUEUE_RETRY_DELAY,
           timeout: QUEUE_TIMEOUT,
@@ -412,33 +397,33 @@ const start = async () => {
         {
           submit: async (proof: any, publicSignals: any[], vk: any, network: any) => {
             return submitProofTransaction(proof, publicSignals, vk, network);
-          }
-        } as TransactionSubmitter
+          },
+        } as TransactionSubmitter,
       );
 
-      transactionQueue.on('processing', (data) => {
+      transactionQueue.on("processing", (data) => {
         fastify.log.info(`Processing transaction ${data.id}, ${data.queueRemaining} in queue`);
       });
 
-      transactionQueue.on('completed', (data) => {
+      transactionQueue.on("completed", (data) => {
         fastify.log.info(`Transaction ${data.id} completed successfully`);
       });
 
-      transactionQueue.on('failed', (data) => {
+      transactionQueue.on("failed", (data) => {
         fastify.log.error(`Transaction ${data.id} failed:`, data.error);
       });
 
-      transactionQueue.on('retry', (data) => {
+      transactionQueue.on("retry", (data) => {
         fastify.log.warn(`Transaction ${data.id} retry ${data.retryCount}/${QUEUE_RETRY_ATTEMPTS}:`, data.error);
       });
 
-      transactionQueue.on('queueCleared', (data) => {
+      transactionQueue.on("queueCleared", (data) => {
         fastify.log.info(`Queue cleared: ${data.cleared} items, active interrupted: ${data.activeInterrupted}`);
       });
 
-      fastify.log.info('✅ Transaction queue initialized');
+      fastify.log.info("✅ Transaction queue initialized");
     } catch (error) {
-      fastify.log.error('Failed to initialize zkVerify session at startup');
+      fastify.log.error("Failed to initialize zkVerify session at startup");
       throw error;
     }
 
@@ -454,25 +439,25 @@ const start = async () => {
 };
 
 async function shutdown() {
-  fastify.log.info('Shutting down gracefully...');
+  fastify.log.info("Shutting down gracefully...");
 
   if (transactionQueue) {
     try {
-      fastify.log.info('Shutting down transaction queue...');
+      fastify.log.info("Shutting down transaction queue...");
       await transactionQueue.shutdown();
-      fastify.log.info('✅ Transaction queue shut down');
+      fastify.log.info("✅ Transaction queue shut down");
     } catch (error) {
-      fastify.log.error('Error shutting down transaction queue:', error as any);
+      fastify.log.error("Error shutting down transaction queue:", error as any);
     }
   }
 
   if (zkSession) {
     try {
-      fastify.log.info('Closing zkVerify session...');
+      fastify.log.info("Closing zkVerify session...");
       await zkSession.close();
-      fastify.log.info('✅ zkVerify session closed');
+      fastify.log.info("✅ zkVerify session closed");
     } catch (error) {
-      fastify.log.error('Error closing zkVerify session:', error as any);
+      fastify.log.error("Error closing zkVerify session:", error as any);
     }
   }
 
@@ -483,7 +468,7 @@ async function shutdown() {
   process.exit(0);
 }
 
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
 
 start();

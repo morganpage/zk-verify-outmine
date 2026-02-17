@@ -28,7 +28,8 @@ Modified `submitProofTransaction()` to:
 - Accept `vk: CachedVK` instead of `registeredVkHash: string`
 - Accept `network: Network` parameter
 - Use `vk.data` for proof submission
-- Removed `.withRegisteredVk()` method call (no longer needed for inline VK)
+- Conditionally call `.withRegisteredVk()` when `vk.type === 'registered'`
+- Skip `.withRegisteredVk()` when `vk.type === 'inline'`
 
 ### 4. Queue Module Updates
 Updated `src/zkTransactionQueue.ts`:
@@ -64,21 +65,23 @@ The callback in the queue initialization (around line 412) needs to be updated t
 2. Or use explicit type assertion with the correct union types
 3. Create a wrapper function that properly matches the interface
 
-## How It Works (When Complete)
+## How It Works
 
 1. **Server Startup:**
-   - `loadVerificationKey()` is called with the configured network
-   - Checks for registered VK hash in environment variables
-   - If found: uses registered VK (faster, cheaper transactions)
-   - If not found: loads `verification_key.json` (fallback)
-   - VK is cached in `cachedVK` variable
+    - `loadVerificationKey()` is called with the configured network
+    - Checks for registered VK hash in environment variables
+    - If found: uses registered VK (faster, cheaper transactions)
+    - If not found: loads `verification_key.json` (fallback)
+    - VK is cached in `cachedVK` variable
 
 2. **Proof Submission:**
-   - `/verify-score` endpoint receives proof and publicSignals
-   - Validation happens (proof/signals are valid)
-   - Transaction is queued with `cachedVK` and `network`
-   - `submitProofTransaction()` uses the cached VK data
-   - No file I/O per request!
+    - `/verify-score` endpoint receives proof and publicSignals
+    - Validation happens (proof/signals are valid)
+    - Transaction is queued with `cachedVK` and `network`
+    - `submitProofTransaction()` uses the cached VK data
+    - If `vk.type === 'registered'`: calls `.withRegisteredVk()` and passes hash to `vk`
+    - If `vk.type === 'inline'`: skips `.withRegisteredVk()` and passes full VK object to `vk`
+    - No file I/O per request!
 
 ## Benefits
 
@@ -95,10 +98,12 @@ The callback in the queue initialization (around line 412) needs to be updated t
 ```bash
 # Test with registered VK hash set
 REGISTERED_VK_HASH_TESTNET="your_hash" npm run dev
+# Should log: "Using registered VK mode"
 
 # Test without registered VK (falls back to verification_key.json)
 # Remove REGISTERED_VK_HASH_TESTNET from .env or set to empty
 npm run dev
+# Should log: "Using inline VK mode"
 
 # Run tests
 npm run test:unit

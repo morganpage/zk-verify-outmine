@@ -12,7 +12,6 @@ describe('TransactionQueue', () => {
 
     queue = new TransactionQueue(
       {
-        maxConcurrent: 1,
         retryAttempts: 3,
         retryDelay: 100,
         timeout: 5000,

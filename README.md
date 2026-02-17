@@ -1593,7 +1593,6 @@ Configure the queue via environment variables in `.env`:
 
 ```bash
 # Transaction Queue Configuration
-QUEUE_MAX_CONCURRENT=1           # Maximum concurrent transactions (default: 1)
 QUEUE_RETRY_ATTEMPTS=3           # Max retry attempts for failed transactions (default: 3)
 QUEUE_RETRY_DELAY=5000            # Delay between retries in milliseconds (default: 5000)
 QUEUE_TIMEOUT=300000             # Timeout for stuck transactions (default: 300000 = 5min)
@@ -1648,11 +1647,10 @@ If a transaction gets stuck:
 
 ### Best Practices
 
-1. **Keep QUEUE_MAX_CONCURRENT = 1** - Prevents nonce conflicts
-2. **Monitor queue status** - Catch stuck transactions early
-3. **Use registered VKs** - Faster, smaller transactions reduce conflict window
-4. **Configure appropriate timeouts** - Balance between patience and promptness
-5. **Watch for failed transactions** - Investigate persistent failures
+1. **Monitor queue status** - Catch stuck transactions early
+2. **Use registered VKs** - Faster, smaller transactions reduce conflict window
+3. **Configure appropriate timeouts** - Balance between patience and promptness
+4. **Watch for failed transactions** - Investigate persistent failures
 
 ### Integration Notes
 
