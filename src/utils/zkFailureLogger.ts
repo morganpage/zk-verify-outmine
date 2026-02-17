@@ -1,6 +1,16 @@
 import crypto from "crypto";
 import { Network } from "../zkNetworkConfig.js";
 
+// Public signal indices from score_prover.circom
+// Based on: component main { public [ claimedTotal, sessionId, playerAddress ] }
+const PUBLIC_SIGNAL_INDEXES = {
+  CLAIMED_TOTAL: 0,
+  SESSION_ID: 1,
+  PLAYER_ADDRESS: 2,
+  SECRET_COMMITMENT: 3,
+  IS_VALID: 4
+} as const;
+
 type FailureType = "VALIDATION_ERROR" | "SUBMISSION_ERROR" | "VERIFICATION_FAILED" | "TRANSACTION_ERROR" | "NETWORK_ERROR" | "UNKNOWN_ERROR";
 
 interface LogFailureParams {
@@ -17,10 +27,19 @@ function generateProofHash(proof: any): string {
 }
 
 function extractPublicSignalsData(publicSignals: any[]): { claimedTotal: string; sessionId: string; playerAddress: string } {
+  // Validate array length before accessing indices
+  if (!Array.isArray(publicSignals) || publicSignals.length < 3) {
+    return {
+      claimedTotal: "unknown",
+      sessionId: "unknown",
+      playerAddress: "unknown"
+    };
+  }
+
   return {
-    claimedTotal: publicSignals[2] || "unknown",
-    sessionId: publicSignals[3] || "unknown",
-    playerAddress: publicSignals[4] || "unknown"
+    claimedTotal: String(publicSignals[PUBLIC_SIGNAL_INDEXES.CLAIMED_TOTAL] || ""),
+    sessionId: String(publicSignals[PUBLIC_SIGNAL_INDEXES.SESSION_ID] || ""),
+    playerAddress: String(publicSignals[PUBLIC_SIGNAL_INDEXES.PLAYER_ADDRESS] || "")
   };
 }
 

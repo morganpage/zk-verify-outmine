@@ -51,5 +51,11 @@ export function getSeedPhrase(network: Network): string {
         throw new Error(`${config.seedPhraseEnvVar} not found in environment`);
     }
     
+    // Validate seed phrase format (typically 12 or 24 words separated by spaces)
+    const words = seedPhrase.trim().split(/\s+/);
+    if (words.length < 12 || words.length > 24) {
+        throw new Error(`${config.seedPhraseEnvVar} must be 12-24 words separated by spaces`);
+    }
+    
     return seedPhrase;
 }

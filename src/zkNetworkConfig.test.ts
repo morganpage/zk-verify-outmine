@@ -67,19 +67,19 @@ describe('networkConfig', () => {
 
     describe('getSeedPhrase', () => {
         it('should return testnet seed phrase when network is testnet', () => {
-            process.env.ZKVERIFY_TESTNET_SEED_PHRASE = 'test phrase twelve words';
+            process.env.ZKVERIFY_TESTNET_SEED_PHRASE = 'one two three four five six seven eight nine ten eleven twelve';
             process.env.ZKVERIFY_NETWORK = 'testnet';
             
             const seedPhrase = getSeedPhrase('testnet');
-            expect(seedPhrase).toBe('test phrase twelve words');
+            expect(seedPhrase).toBe('one two three four five six seven eight nine ten eleven twelve');
         });
-
+        
         it('should return mainnet seed phrase when network is mainnet', () => {
-            process.env.ZKVERIFY_MAINNET_SEED_PHRASE = 'main phrase twelve words';
+            process.env.ZKVERIFY_MAINNET_SEED_PHRASE = 'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu';
             process.env.ZKVERIFY_NETWORK = 'mainnet';
             
             const seedPhrase = getSeedPhrase('mainnet');
-            expect(seedPhrase).toBe('main phrase twelve words');
+            expect(seedPhrase).toBe('alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu');
         });
 
         it('should throw error when testnet seed phrase is missing', () => {
@@ -95,6 +95,24 @@ describe('networkConfig', () => {
             
             expect(() => getSeedPhrase('mainnet')).toThrow(
                 'ZKVERIFY_MAINNET_SEED_PHRASE not found in environment'
+            );
+        });
+        
+        it('should throw error when seed phrase has too few words', () => {
+            process.env.ZKVERIFY_TESTNET_SEED_PHRASE = 'one two three four five';
+            process.env.ZKVERIFY_NETWORK = 'testnet';
+            
+            expect(() => getSeedPhrase('testnet')).toThrow(
+                'ZKVERIFY_TESTNET_SEED_PHRASE must be 12-24 words separated by spaces'
+            );
+        });
+        
+        it('should throw error when seed phrase has too many words', () => {
+            process.env.ZKVERIFY_TESTNET_SEED_PHRASE = 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twenty twentyone twentytwo twentythree twentyfour twentyfive';
+            process.env.ZKVERIFY_NETWORK = 'testnet';
+            
+            expect(() => getSeedPhrase('testnet')).toThrow(
+                'ZKVERIFY_TESTNET_SEED_PHRASE must be 12-24 words separated by spaces'
             );
         });
     });

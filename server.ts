@@ -1,5 +1,6 @@
 import Fastify, { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
+import rateLimit from "@fastify/rate-limit";
 import { zkVerifySession, Library, CurveType, VerifyTransactionInfo } from "zkverifyjs";
 import type { zkVerifySession as ZkVerifySessionType } from "zkverifyjs";
 import dotenv from "dotenv";
@@ -14,11 +15,60 @@ dotenv.config();
 
 const fastify: FastifyInstance = Fastify({ logger: true });
 
+const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || "100", 10);
+const RATE_LIMIT_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || "60000", 10);
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(",").map(origin => origin.trim()) || ["*"];
+
+interface VerifyScoreBody {
+    proof: {
+        pi_a: string[];
+        pi_b: string[][];
+        pi_c: string[];
+        protocol: string;
+        curve: string;
+    };
+    publicSignals: string[];
+}
+
+function validateVerifyScore(body: any): { valid: boolean; errors?: string[] } {
+    const errors: string[] = [];
+
+    if (!body.proof || typeof body.proof !== "object") {
+        errors.push("proof must be an object");
+    } else {
+        if (!Array.isArray(body.proof.pi_a) || body.proof.pi_a.length !== 2) {
+            errors.push("proof.pi_a must be an array of 2 strings");
+        }
+        if (!Array.isArray(body.proof.pi_b) || body.proof.pi_b.length !== 2) {
+            errors.push("proof.pi_b must be an array of 2 arrays");
+        }
+        if (!Array.isArray(body.proof.pi_c) || body.proof.pi_c.length !== 2) {
+            errors.push("proof.pi_c must be an array of 2 strings");
+        }
+        if (body.proof.protocol !== "groth16") {
+            errors.push("proof.protocol must be 'groth16'");
+        }
+        if (body.proof.curve !== "bn128") {
+            errors.push("proof.curve must be 'bn128'");
+        }
+    }
+
+    if (!Array.isArray(body.publicSignals)) {
+        errors.push("publicSignals must be an array");
+    } else if (body.publicSignals.length < 4) {
+        errors.push("publicSignals must have at least 4 elements");
+    }
+
+    return { valid: errors.length === 0, errors: errors.length > 0 ? errors : undefined };
+}
+
 let zkSession: ZkVerifySessionType | null = null;
 let isReconnecting = false;
 let reconnectionAttempts = 0;
 const MAX_RECONNECTION_ATTEMPTS = 10;
 const BASE_RECONNECT_DELAY = 1000;
+const MAX_RECONNECTION_TIME_MS = 600000; // 10 minutes total before giving up
+let reconnectionStartTime: number | null = null;
 
 let disconnectCleanup: (() => void) | null = null;
 
@@ -43,6 +93,12 @@ async function loadVerificationKey(network: Network): Promise<CachedVK> {
   const registeredVkHash = network === "testnet" ? process.env.REGISTERED_VK_HASH_TESTNET : process.env.REGISTERED_VK_HASH_MAINNET;
 
   if (registeredVkHash && registeredVkHash.length > 0) {
+    // Validate VK hash format (must be hex string starting with 0x, 66 chars total)
+    if (!/^0x[a-fA-F0-9]{64}$/.test(registeredVkHash)) {
+      fastify.log.error(`Invalid VK hash format for ${network}: ${registeredVkHash}`);
+      throw new Error(`REGISTERED_VK_HASH_${network.toUpperCase()} must be a hex string starting with '0x' and 66 characters long`);
+    }
+    
     fastify.log.info(`Using registered VK hash for ${network}`);
     return {
       type: "registered",
@@ -94,9 +150,24 @@ async function attemptReconnection(): Promise<void> {
     return;
   }
 
+  // Check total reconnection time to prevent infinite retry
+  if (reconnectionStartTime && (Date.now() - reconnectionStartTime > MAX_RECONNECTION_TIME_MS)) {
+    fastify.log.error(`Max reconnection time (${MAX_RECONNECTION_TIME_MS}ms) reached. Giving up.`);
+    isReconnecting = false;
+    reconnectionStartTime = null;
+    return;
+  }
+
   if (reconnectionAttempts >= MAX_RECONNECTION_ATTEMPTS) {
     fastify.log.error(`Max reconnection attempts (${MAX_RECONNECTION_ATTEMPTS}) reached. Giving up.`);
+    isReconnecting = false;
+    reconnectionStartTime = null;
     return;
+  }
+
+  // Set reconnection start time on first attempt
+  if (!reconnectionStartTime) {
+    reconnectionStartTime = Date.now();
   }
 
   isReconnecting = true;
@@ -113,6 +184,7 @@ async function attemptReconnection(): Promise<void> {
     zkSession = await initializeZkSession();
     reconnectionAttempts = 0;
     isReconnecting = false;
+    reconnectionStartTime = null;
     fastify.log.info("✅ Reconnected to zkVerify successfully");
 
     monitorSessionConnection();
@@ -120,7 +192,8 @@ async function attemptReconnection(): Promise<void> {
     fastify.log.error(`Reconnection attempt ${reconnectionAttempts} failed:`, error as any);
     isReconnecting = false;
 
-    setTimeout(() => attemptReconnection(), 0);
+    // Schedule next reconnection (still protected by isReconnecting check at start)
+    setTimeout(() => attemptReconnection(), 100);
   }
 }
 
@@ -251,9 +324,24 @@ fastify.get("/health", async (request: FastifyRequest, reply: FastifyReply) => {
   return reply.status(statusCode).send(response);
 });
 
+// Register rate limiting
+await fastify.register(rateLimit, {
+    max: RATE_LIMIT_MAX,
+    timeWindow: RATE_LIMIT_WINDOW_MS,
+    errorResponseBuilder: (request, context) => ({
+        code: 429,
+        error: "Too many requests",
+        message: `Rate limit exceeded, please try again later`
+    }),
+    skipOnError: false
+});
+
 // Register CORS
 fastify.register(cors, {
-  origin: "*", // In production, restrict this to your game's domain
+    origin: ALLOWED_ORIGINS.length > 0 && !ALLOWED_ORIGINS.includes("*") 
+        ? ALLOWED_ORIGINS 
+        : "*", // In production, restrict this to your game's domain
+    credentials: true
 });
 
 fastify.get("/queue-status", async (request: FastifyRequest, reply: FastifyReply) => {
@@ -273,11 +361,6 @@ fastify.get("/queue-status", async (request: FastifyRequest, reply: FastifyReply
   });
 });
 
-interface VerifyScoreBody {
-  proof: any;
-  publicSignals: any[];
-}
-
 /**
  * POST /verify-score
  *
@@ -288,11 +371,18 @@ interface VerifyScoreBody {
  */
 fastify.post("/verify-score", async (request: FastifyRequest<{ Body: VerifyScoreBody }>, reply: FastifyReply) => {
   let { proof, publicSignals } = request.body;
-
+  
   proof = sanitizeProofData(proof);
-
+  
   const network: Network = (process.env.ZKVERIFY_NETWORK as Network) || "testnet";
-
+  
+  // Schema validation
+  const schemaValidation = validateVerifyScore(request.body);
+  if (!schemaValidation.valid) {
+    fastify.log.info(`Schema validation failed: ${schemaValidation.errors?.join(", ")}`);
+    return reply.status(400).send({ error: "Invalid request format", details: schemaValidation.errors });
+  }
+  
   const validation = validateProofAndSignals(proof, publicSignals);
   if (!validation.valid) {
     logFailure({
@@ -303,6 +393,15 @@ fastify.post("/verify-score", async (request: FastifyRequest<{ Body: VerifyScore
       network,
     });
     return reply.status(400).send({ error: validation.error || "Invalid proof or publicSignals" });
+  }
+  
+  // Null safety check for cachedVK
+  if (!cachedVK) {
+    fastify.log.error("Verification key not loaded");
+    return reply.status(500).send({
+      success: false,
+      error: "Service unavailable - verification key not initialized"
+    });
   }
 
   try {
@@ -337,7 +436,7 @@ fastify.post("/verify-score", async (request: FastifyRequest<{ Body: VerifyScore
 
     const queueStatus = (transactionQueue as TransactionQueue).getStatus();
 
-    const result = await (transactionQueue as TransactionQueue).submit(proof, publicSignals, cachedVK!, network);
+    const result = await (transactionQueue as TransactionQueue).submit(proof, publicSignals, cachedVK, network);
 
     fastify.log.info(`Proof submission completed: ${result.success ? "success" : "failed"}`);
 
@@ -441,6 +540,10 @@ const start = async () => {
 async function shutdown() {
   fastify.log.info("Shutting down gracefully...");
 
+  // Cancel any pending reconnection attempts
+  isReconnecting = true;
+  reconnectionStartTime = null;
+
   if (transactionQueue) {
     try {
       fastify.log.info("Shutting down transaction queue...");
@@ -462,7 +565,20 @@ async function shutdown() {
   }
 
   if (disconnectCleanup) {
-    disconnectCleanup();
+    try {
+      disconnectCleanup();
+    } catch (error) {
+      fastify.log.error("Error disconnecting cleanup:", error as any);
+    }
+  }
+
+  // Close Fastify server gracefully
+  try {
+    fastify.log.info("Closing Fastify server...");
+    await fastify.close();
+    fastify.log.info("✅ Fastify server closed");
+  } catch (error) {
+    fastify.log.error("Error closing Fastify server:", error as any);
   }
 
   process.exit(0);

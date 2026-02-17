@@ -207,11 +207,18 @@ export class TransactionQueue extends EventEmitter {
   }
 
   private isNonceConflict(errorMessage: string): boolean {
+    const lowerMessage = errorMessage.toLowerCase();
+
+    // Specific nonce conflict error patterns
     return (
-      errorMessage.includes('Priority is too low') ||
-      errorMessage.includes('1014') ||
-      errorMessage.includes('Transaction is already in the pool') ||
-      errorMessage.includes('Invalid Transaction')
+      lowerMessage.includes('priority is too low') ||
+      lowerMessage.includes('invalid transaction') && lowerMessage.includes('nonce') ||
+      lowerMessage.includes('stale nonce') ||
+      lowerMessage.includes('nonce too low') ||
+      lowerMessage.includes('transaction is already in the pool') ||
+      lowerMessage.includes('nonce mismatch') ||
+      // Error code 1014 specifically refers to nonce priority too low
+      lowerMessage.includes('1014')
     );
   }
 
