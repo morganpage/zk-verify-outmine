@@ -3,6 +3,11 @@ pragma circom 2.1.0;
 include "../node_modules/circomlib/circuits/poseidon.circom";
 include "../node_modules/circomlib/circuits/comparators.circom";
 
+// Circuit Constants
+const BIT_WIDTH = 32;
+const MAX_SCORE_VALUE = 1000;
+const NUM_SCORES = 5;
+
 template ScoreVerifier(n) {
     // Private inputs
     signal input scores[n];
@@ -21,9 +26,9 @@ template ScoreVerifier(n) {
     var sum = 0;
     component lt[n];
     for (var i = 0; i < n; i++) {
-        lt[i] = LessThan(32); 
+        lt[i] = LessThan(BIT_WIDTH);
         lt[i].in[0] <== scores[i];
-        lt[i].in[1] <== 1001; 
+        lt[i].in[1] <== MAX_SCORE_VALUE + 1;
         lt[i].out === 1;
         sum += scores[i];
     }
@@ -41,4 +46,4 @@ template ScoreVerifier(n) {
     isValid <== 1;
 }
 
-component main { public [ claimedTotal, sessionId, playerAddress ] } = ScoreVerifier(5);
+component main { public [ claimedTotal, sessionId, playerAddress ] } = ScoreVerifier(NUM_SCORES);
