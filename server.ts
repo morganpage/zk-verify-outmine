@@ -1,7 +1,7 @@
 import Fastify, { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
-import { zkVerifySession, Library, CurveType, VerifyTransactionInfo } from "zkverifyjs";
+import { zkVerifySession, Library, CurveType } from "zkverifyjs";
 import type { zkVerifySession as ZkVerifySessionType } from "zkverifyjs";
 import dotenv from "dotenv";
 import fs from "fs";
@@ -10,6 +10,15 @@ import { getNetworkConfig, getSeedPhrase, Network } from "./src/zkNetworkConfig.
 import { logFailure, categorizeError as categorizeZkError } from "./src/utils/zkFailureLogger.js";
 import { TransactionQueue, type TransactionResult, type TransactionSubmitter } from "./src/zkTransactionQueue.js";
 import { sanitizeProofData, validateProofAndSignals, categorizeTransactionError } from "./src/zkTransactionUtils.js";
+import {
+    initPlayerProver,
+    generatePlayerProof,
+    isPlayerProverInitialized,
+    getPlayerProverStatus,
+    shutdownPlayerProver,
+    type PlayerProofInputs,
+    type PlayerProofResult,
+} from "./src/zkPlayerProver.js";
 
 dotenv.config();
 
@@ -250,7 +259,7 @@ async function submitProofTransaction(proof: any, publicSignals: any[], vk: Cach
     fastify.log.info('Using inline VK mode');
   }
 
-  const { transactionResult } = await verifyBuilder.execute({
+  const { events, transactionResult } = await verifyBuilder.execute({
     proofData: {
       proof: proof,
       publicSignals: publicSignals,
@@ -258,13 +267,23 @@ async function submitProofTransaction(proof: any, publicSignals: any[], vk: Cach
     },
   });
 
-  const transactionInfo = (await transactionResult) as VerifyTransactionInfo;
-  fastify.log.info(`Transaction submitted: ${transactionInfo.txHash}`);
+  const txHash = await new Promise<string>((resolve, reject) => {
+    events.once("includedInBlock", (data: any) => {
+      resolve(data.txHash);
+    });
+    events.once("error", (err: any) => {
+      reject(err instanceof Error ? err : new Error(String(err)));
+    });
+  });
+
+  fastify.log.info(`Transaction included in block: ${txHash}`);
+  transactionResult.catch(() => {});
 
   return {
     success: true,
-    txHash: transactionInfo.txHash,
-    explorerUrl: `${networkConfig.explorer}/vverify/transaction/${transactionInfo.txHash}`,
+    txHash,
+    explorerUrl: `${networkConfig.explorer}/vverify/transaction/${txHash}`,
+    finalizationPromise: transactionResult,
   };
 }
 
@@ -436,7 +455,7 @@ fastify.post("/verify-score", async (request: FastifyRequest<{ Body: VerifyScore
 
     const queueStatus = (transactionQueue as TransactionQueue).getStatus();
 
-    const result = await (transactionQueue as TransactionQueue).submit(proof, publicSignals, cachedVK, network);
+    const result = await (transactionQueue as TransactionQueue).submit(proof, publicSignals, cachedVK, network, "groth16-client");
 
     fastify.log.info(`Proof submission completed: ${result.success ? "success" : "failed"}`);
 
@@ -474,6 +493,87 @@ fastify.post("/verify-score", async (request: FastifyRequest<{ Body: VerifyScore
       errorType,
     });
   }
+});
+
+/**
+ * POST /verify-player
+ *
+ * Server-side per-player proof generation and verification.
+ *
+ * Unlike /verify-score (which accepts a pre-generated Groth16 proof from the client),
+ * this endpoint accepts a single player's reward inputs, generates an UltraHonk proof
+ * server-side using the Noir circuit, and submits it to zkVerify asynchronously.
+ *
+ * Body: PlayerProofInputs = {
+ *   run_id: string,
+ *   player_id: string,
+ *   rewards_earned: string,
+ *   timestamp: string,
+ *   base_reward: string,
+ *   team_bonus: string,
+ *   mode_multiplier: string,
+ *   unit_count: string,
+ *   boost_multiplier: string,
+ *   item_multiplier: string,
+ *   game_mode: string,
+ *   random_outcome: string,
+ *   has_bonus_trait: string,
+ * }
+ */
+fastify.post("/verify-player", async (request: FastifyRequest<{ Body: PlayerProofInputs }>, reply: FastifyReply) => {
+    if (!isPlayerProverInitialized()) {
+        return reply.status(503).send({
+            success: false,
+            error: "Player prover not initialized",
+        });
+    }
+
+    const inputs = request.body;
+
+    if (!inputs.run_id || !inputs.player_id || !inputs.rewards_earned || !inputs.timestamp) {
+        return reply.status(400).send({
+            success: false,
+            error: "Missing required fields: run_id, player_id, rewards_earned, timestamp",
+        });
+    }
+
+    try {
+        fastify.log.info(`Generating player proof for ${inputs.player_id} (run ${inputs.run_id})...`);
+
+        const result: PlayerProofResult = await generatePlayerProof(inputs);
+
+        if (!result.success) {
+            fastify.log.error(`Player proof generation failed: ${result.error}`);
+            return reply.status(500).send({
+                success: false,
+                error: result.error,
+            });
+        }
+
+        return {
+            success: true,
+            message: "Player proof generated and submitted to zkVerify",
+            runId: inputs.run_id,
+            playerId: inputs.player_id,
+            rewardsEarned: inputs.rewards_earned,
+            provingTimeMs: result.provingTimeMs,
+        };
+    } catch (error: any) {
+        fastify.log.error(error);
+        return reply.status(500).send({
+            success: false,
+            error: error.message,
+        });
+    }
+});
+
+/**
+ * GET /player-prover-status
+ *
+ * Returns the status of the player prover (initialized, queue status).
+ */
+fastify.get("/player-prover-status", async (request: FastifyRequest, reply: FastifyReply) => {
+    return getPlayerProverStatus();
 });
 
 // Run the server
@@ -526,11 +626,21 @@ const start = async () => {
       throw error;
     }
 
+    // Initialize player prover (Noir + UltraHonk) — non-fatal if circuit not compiled
+    try {
+      await initPlayerProver();
+      fastify.log.info("✅ Player prover initialized");
+    } catch (error) {
+      fastify.log.warn("⚠️ Player prover not initialized (circuit may not be compiled):", error as any);
+      fastify.log.warn("   Run 'nargo compile' in circuits/player_prover/ to enable server-side proofs");
+    }
+
     const port = Number(process.env.PORT) || 3000;
     await fastify.listen({ port, host: "0.0.0.0" });
     fastify.log.info(`Server listening on ${port}`);
     fastify.log.info(`Health check available at http://0.0.0.0:${port}/health`);
     fastify.log.info(`Queue status available at http://0.0.0.0:${port}/queue-status`);
+    fastify.log.info(`Player prover status available at http://0.0.0.0:${port}/player-prover-status`);
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
@@ -552,6 +662,12 @@ async function shutdown() {
     } catch (error) {
       fastify.log.error("Error shutting down transaction queue:", error as any);
     }
+  }
+
+  try {
+    await shutdownPlayerProver();
+  } catch (error) {
+    fastify.log.error("Error shutting down player prover:", error as any);
   }
 
   if (zkSession) {

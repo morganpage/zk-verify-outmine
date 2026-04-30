@@ -3,7 +3,9 @@
 This project demonstrates how to use Zero-Knowledge Proofs to verify gaming scores and submit them to the [zkVerify](https://zkverify.io/) network.
 
 ## Project Structure
-- `circuits/`: Contains the `score_prover.circom` circuit and compiled artifacts
+- `circuits/`: ZK circuits
+  - `score_prover.circom`: Circom circuit for client-side score verification (Groth16)
+  - `player_prover/`: Noir circuit for server-side reward verification (UltraHonk)
 - `scripts/`: Integration scripts for zkVerify CLI workflow
 - `server.ts`: Production backend server for proof submission
 - `test.html`: Browser-based proof generation UI
@@ -1677,6 +1679,293 @@ The security model works as follows:
 5. **Attestation event confirms validity** (score can be added to leaderboard)
 6. **Backend validates sessionId uniqueness** (ensures no duplicate submissions)
 
+## Server-Side Proof Generation with Noir & UltraHonk
+
+The existing sections demonstrate **client-side proof generation** — the player's device generates a Groth16 proof, and the server submits it to zkVerify. This section adds **server-side proof generation** using Noir and UltraHonk — a different pattern where the server itself generates the proof.
+
+### Client-Side vs Server-Side: Two Patterns
+
+```
+CLIENT-SIDE (Groth16 — existing):
+  Player → generates ZK proof in browser/Unity → sends proof to server → server submits to zkVerify
+  Use when: verifying individual player actions (scores, achievements, identity)
+
+SERVER-SIDE (UltraHonk — this section):
+  Game server → computes player's reward → generates ZK proof → submits to zkVerify
+  Use when: server computes game results and players need assurance the calculation was honest
+```
+
+**Why server-side proofs?** When your game server computes rewards (e.g. idle mining, auto-battles, scheduled events), players must trust the server applied the correct formula. By generating a ZK proof for each calculation, players get cryptographic assurance — without trusting the server's word alone.
+
+### Groth16 vs UltraHonk: When to Use Which
+
+| Aspect | Groth16 (Circom) | UltraHonk (Noir) |
+|--------|-------------------|-------------------|
+| **Where proof is generated** | Client (browser WASM, Unity) | Server (Node.js) |
+| **Trusted setup** | Required per circuit | Not required (universal) |
+| **Proof size** | Small (~128 bytes) | Larger (~kilobytes) |
+| **Proving speed** | Slower for complex circuits | Faster for complex circuits |
+| **Language** | Circom (constraint-oriented DSL) | Noir (Rust-like imperative) |
+| **Browser support** | Yes (snarkjs WASM) | Limited (mainly server-side) |
+| **Best for** | Client-generated proofs | Server-generated proofs |
+| **Ecosystem** | Mature, widely used | Newer, growing rapidly |
+
+**Key insight:** Groth16 is ideal when the player generates the proof on their device. UltraHonk is ideal when the server generates the proof — it's faster for complex circuits and doesn't require a trusted setup ceremony.
+
+### The Player Prover Circuit
+
+The `circuits/player_prover/src/main.nr` circuit proves:
+
+> "This player's reward was correctly computed using the game's reward formula, given the game config, player stats, and random outcome."
+
+**The pattern** (adaptable to any game):
+1. Take the game's reward formula and all its inputs
+2. Compute the expected reward inside the circuit
+3. Assert: `expected_reward == claimed_reward`
+
+If the server tampered with any parameter (inflated rewards, changed multipliers, ignored the random outcome), the proof will fail.
+
+**Reward formula** (per player):
+```
+base      = config.base_reward
+team      = base × unit_count × (100 + (unit_count - 1) × team_bonus) / 100
+mode      = team × mode_multiplier / 100        (if bonus mode active)
+final     = mode × (100 + boost) × (100 + item) / 10000
+```
+
+On failure with a special trait (`has_bonus_trait`): player gets 10% of what they would have earned. On failure without the trait: player gets 0.
+
+### Circuit Inputs/Outputs Reference
+
+#### Public Inputs (visible on-chain)
+
+| Name | Type | Description | Example |
+|------|------|-------------|---------|
+| `run_id` | Field | Unique game tick / run identifier | `"42"` |
+| `player_id` | Field | SHA-256 hash of player's ID (privacy-preserving) | `"123456789"` |
+| `rewards_earned` | Field | Reward given to this player | `"24"` |
+| `timestamp` | Field | Unix timestamp of processing | `"1700000000"` |
+
+#### Private Inputs (stay off-chain)
+
+| Name | Type | Description | Example |
+|------|------|-------------|---------|
+| `base_reward` | Field | Base reward per unit per tick | `"10"` |
+| `team_bonus` | Field | Bonus percentage per extra unit | `"20"` (means 20%) |
+| `mode_multiplier` | Field | Bonus mode multiplier | `"150"` (means 1.5x) |
+| `unit_count` | Field | Number of units (pets, workers, etc.) | `"2"` |
+| `boost_multiplier` | Field | Active boost percentage | `"0"` |
+| `item_multiplier` | Field | Item bonus percentage | `"0"` |
+| `game_mode` | Field | 0 = normal, 1 = bonus mode | `"0"` |
+| `random_outcome` | Field | 0 = success, 1 = failure | `"0"` |
+| `has_bonus_trait` | Field | 1 = consolation reward on failure | `"0"` |
+
+#### How the example works:
+
+Player with 2 units, normal mode, success, no boosts, base_reward=10, team_bonus=20%:
+```
+10 × 2 × (100 + 1×20) / 100 = 10 × 2 × 1.2 = 24
+```
+
+### Privacy: Hashing Player IDs
+
+Player IDs are hashed to Noir Fields using SHA-256 truncated to 31 hex characters:
+
+```typescript
+function playerIdToField(playerId: string): string {
+  const hash = crypto.createHash("sha256").update(playerId, "utf8").digest("hex");
+  const truncated = hash.slice(0, 31); // fits within Grumpkin field
+  return BigInt("0x" + truncated).toString();
+}
+```
+
+This means the raw player ID (e.g. a Telegram user ID) never appears on-chain — only its hash. The server can still verify which player the proof belongs to by recomputing the hash.
+
+### Adapting for Your Game
+
+To adapt this circuit for your own game:
+
+1. **Change the reward formula** in `main.nr` — replace the calculation with your game's logic
+2. **Add/remove inputs** — e.g. add `level`, `difficulty`, `streak_count`
+3. **Add config parameters** — add new private inputs for game settings your formula needs
+4. **Change the failure handling** — modify the `random_outcome` / `has_bonus_trait` logic
+
+The circuit is intentionally simple — a single player, scalar inputs, one assertion. This keeps proving fast (~1-2 seconds) and the proof small.
+
+### Setup & Compilation
+
+#### 1. Install the Noir toolchain
+
+```bash
+# Install Nargo (Noir compiler)
+curl -L https://raw.githubusercontent.com/noir-lang/noirup/main/install | bash
+noirup
+```
+
+#### 2. Compile the circuit
+
+```bash
+cd circuits/player_prover
+nargo compile
+```
+
+This generates `target/player_prover.json` (the compiled circuit bytecode) used by the prover.
+
+#### 3. Test the circuit locally
+
+```bash
+cd circuits/player_prover
+nargo execute
+```
+
+This runs the circuit with the values in `Prover.toml` and verifies the constraints pass.
+
+#### 4. Register the verification key
+
+```bash
+# Testnet
+npm run register:player-vk:testnet
+
+# Mainnet
+npm run register:player-vk:mainnet
+```
+
+Save the output hash in your `.env` as `REGISTERED_PLAYER_VK_HASH_TESTNET` or `REGISTERED_PLAYER_VK_HASH_MAINNET`.
+
+### API Endpoint: POST /verify-player
+
+Unlike `POST /verify-score` (which accepts a pre-generated proof from the client), this endpoint **generates the proof server-side** and submits it to zkVerify asynchronously.
+
+**Request:**
+
+```json
+{
+  "run_id": "42",
+  "player_id": "player_abc123",
+  "rewards_earned": "24",
+  "timestamp": "1700000000",
+  "base_reward": "10",
+  "team_bonus": "20",
+  "mode_multiplier": "150",
+  "unit_count": "2",
+  "boost_multiplier": "0",
+  "item_multiplier": "0",
+  "game_mode": "0",
+  "random_outcome": "0",
+  "has_bonus_trait": "0"
+}
+```
+
+**Response (success):**
+
+```json
+{
+  "success": true,
+  "message": "Player proof generated and submitted to zkVerify",
+  "runId": "42",
+  "playerId": "player_abc123",
+  "rewardsEarned": "24",
+  "provingTimeMs": 1200
+}
+```
+
+The proof is generated synchronously (returned in the response), but on-chain submission happens asynchronously in the background via the transaction queue.
+
+### Additional Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/player-prover-status` | GET | Player prover initialization status and queue info |
+
+### Integration Pattern
+
+To integrate server-side player proofs into your game backend:
+
+```
+1. Game loop runs on schedule (e.g. every 2 minutes)
+2. For each player:
+   a. Compute their reward using your game formula
+   b. Generate a ZK proof via generatePlayerProof()
+   c. Proof is submitted to zkVerify asynchronously (non-blocking)
+3. Store the proof alongside your game results
+4. Players can verify on zkVerify explorer that their result was proven
+```
+
+**Performance considerations:**
+- Proof generation for a single player is fast (~1-2 seconds)
+- The transaction queue serializes on-chain submissions to prevent nonce conflicts
+- Proof generation is synchronous (blocks until complete), but on-chain submission is async
+- For high player counts, proofs can be generated in parallel across workers
+
+### Transaction Lifecycle: Inclusion vs Finalization
+
+zkVerify (a Substrate-based chain) has two distinct phases for each transaction:
+
+```
+Submit TX → Included in Block (~6s) → Finalized (~30-60s)
+```
+
+**Inclusion** means the block producer accepted the transaction into a block. At this point the tx hash is known and the transaction is visible on the explorer.
+
+**Finalization** means the block has been confirmed by enough validators and is permanent. This is the stronger guarantee.
+
+#### Why we resolve on inclusion, not finalization
+
+The transaction queue resolves (unblocks the caller) as soon as a transaction is **included in a block**, rather than waiting for full finalization. The finalization is tracked asynchronously via a `finalizationPromise`.
+
+```typescript
+// Event-driven: resolves immediately when included in block
+const { events, transactionResult } = await verifyBuilder.execute({...});
+
+const txHash = await new Promise<string>((resolve, reject) => {
+  events.once("includedInBlock", (data) => resolve(data.txHash));
+  events.once("error", (err) => reject(err));
+});
+
+// Finalization tracked separately — does not block the queue
+transactionResult.catch(() => {});
+return { txHash, finalizationPromise: transactionResult };
+```
+
+**Why this matters for throughput:** If the queue waited for finalization (~30-60 seconds per transaction), a queue of 100 player proofs would take ~50-100 minutes to drain. By resolving on inclusion (~6 seconds), the same queue drains in ~10 minutes. Finalization is still tracked — you can log or persist the finalization status via the promise.
+
+### Execution-Level Timeouts
+
+The transaction queue uses execution-level timeouts rather than queue-level timeouts.
+
+**The problem with queue-level timeouts:** If you start a 5-minute timer when `submit()` is called, items at the back of a long queue can timeout before they even start executing. With 10 items ahead, each taking 30 seconds to finalize, the 11th item waits 5 minutes just in the queue — and its timeout fires before execution begins.
+
+**The solution — execution-level timeouts:** The timer only starts when the transaction is actually being submitted to the chain. Time spent waiting in the queue does not count toward the timeout.
+
+```typescript
+// Timeout wraps ONLY the actual execution — not the queue wait
+private executeTransactionWithTimeout(item: QueueItem): Promise<TransactionResult> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Transaction timeout after ${item.timeout}ms`));
+    }, item.timeout);
+
+    this.executeTransaction(item).then(resolve, reject);
+  });
+}
+```
+
+Each queue item also carries its own `timeout` value, allowing different transaction types to have different time limits.
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `REGISTERED_PLAYER_VK_HASH_TESTNET` | Recommended | On-chain VK hash for player prover (testnet) |
+| `REGISTERED_PLAYER_VK_HASH_MAINNET` | Recommended | On-chain VK hash for player prover (mainnet) |
+
+### NPM Scripts
+
+| Script | Description |
+|--------|-------------|
+| `npm run register:player-vk:testnet` | Register player prover VK on testnet |
+| `npm run register:player-vk:mainnet` | Register player prover VK on mainnet |
+
 ## Resources
 
 - [zkVerify Documentation](https://docs.zkverify.io/)
@@ -1684,5 +1973,7 @@ The security model works as follows:
 - [zkVerify Mainnet Explorer](https://zkverify.subscan.io/)
 - [Circom Documentation](https://docs.circom.io/)
 - [SnarkJS Documentation](https://github.com/iden3/snarkjs)
+- [Noir Documentation](https://noir-lang.org/docs/)
+- [Barretenberg (bb.js) Documentation](https://github.com/AztecProtocol/aztec-packages/tree/master/barretenberg/ts)
 - [zkVerify Testnet Faucet](https://faucet.zkverify.io/)
 - [Ankr zkVerify RPC](https://www.ankr.com/web3-api/chains-list/zkverify/) (Recommended for production)

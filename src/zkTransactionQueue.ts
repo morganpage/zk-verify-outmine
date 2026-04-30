@@ -13,6 +13,8 @@ export interface QueueItem {
   timestamp: number;
   retryCount: number;
   maxRetries: number;
+  user_id: string;
+  timeout: number;
 }
 
 export interface QueueStatus {
@@ -42,6 +44,7 @@ export interface TransactionResult {
   txHash?: string;
   error?: string;
   explorerUrl?: string;
+  finalizationPromise?: Promise<any>;
 }
 
 export interface TransactionSubmitter {
@@ -103,6 +106,7 @@ export class TransactionQueue extends EventEmitter {
       hash?: string;
     },
     network: 'testnet' | 'mainnet',
+    user_id: string,
     timeout?: number
   ): Promise<TransactionResult> {
     if (this.isShuttingDown) {
@@ -110,6 +114,8 @@ export class TransactionQueue extends EventEmitter {
     }
 
     const id = `tx_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    const effectiveTimeout = timeout || this.config.timeout;
 
     const item: QueueItem = {
       id,
@@ -120,6 +126,8 @@ export class TransactionQueue extends EventEmitter {
       timestamp: Date.now(),
       retryCount: 0,
       maxRetries: this.config.retryAttempts,
+      user_id,
+      timeout: effectiveTimeout,
     };
 
     this.queue.push(item);
@@ -128,22 +136,12 @@ export class TransactionQueue extends EventEmitter {
     this.processQueue();
 
     return new Promise((resolve, reject) => {
-      const itemTimeout = setTimeout(() => {
-        const index = this.queue.findIndex(i => i.id === id);
-        if (index !== -1) {
-          this.queue.splice(index, 1);
-          reject(new Error(`Transaction timeout after ${timeout || this.config.timeout}ms`));
-        }
-      }, timeout || this.config.timeout);
-
       this.once(`completed_${id}`, (result: TransactionResult) => {
-        clearTimeout(itemTimeout);
         this.removeListener(`failed_${id}`, reject as any);
         resolve(result);
       });
 
       this.once(`failed_${id}`, (error: Error) => {
-        clearTimeout(itemTimeout);
         this.removeListener(`completed_${id}`, resolve as any);
         reject(error);
       });
@@ -171,13 +169,13 @@ export class TransactionQueue extends EventEmitter {
         this.emit('processing', { id: item.id, queueRemaining: this.queue.length });
 
         try {
-          const result = await this.executeTransaction(item);
+          const result = await this.executeTransactionWithTimeout(item);
 
           this.lastCompletedTimestamp = Date.now();
           this.totalProcessed++;
           this.activeTransaction = null;
           this.emit(`completed_${item.id}`, result);
-          this.emit('completed', { id: item.id, result });
+          this.emit('completed', { id: item.id, result, user_id: item.user_id });
         } catch (error: any) {
           const errorMsg = error.message || String(error);
 
@@ -192,7 +190,7 @@ export class TransactionQueue extends EventEmitter {
             this.activeTransaction = null;
             this.totalFailed++;
             this.emit(`failed_${item.id}`, error);
-            this.emit('failed', { id: item.id, error });
+            this.emit('failed', { id: item.id, error, user_id: item.user_id });
           }
         }
       }
@@ -206,20 +204,27 @@ export class TransactionQueue extends EventEmitter {
     return await this.submitter.submit(item.proof, item.publicSignals, item.vk, item.network);
   }
 
-  private isNonceConflict(errorMessage: string): boolean {
-    const lowerMessage = errorMessage.toLowerCase();
+  private executeTransactionWithTimeout(item: QueueItem): Promise<TransactionResult> {
+    return new Promise<TransactionResult>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(`Transaction timeout after ${item.timeout}ms`));
+      }, item.timeout);
 
-    // Specific nonce conflict error patterns
-    return (
-      lowerMessage.includes('priority is too low') ||
-      lowerMessage.includes('invalid transaction') && lowerMessage.includes('nonce') ||
-      lowerMessage.includes('stale nonce') ||
-      lowerMessage.includes('nonce too low') ||
-      lowerMessage.includes('transaction is already in the pool') ||
-      lowerMessage.includes('nonce mismatch') ||
-      // Error code 1014 specifically refers to nonce priority too low
-      lowerMessage.includes('1014')
-    );
+      this.executeTransaction(item).then(
+        (result) => {
+          clearTimeout(timer);
+          resolve(result);
+        },
+        (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      );
+    });
+  }
+
+  private isNonceConflict(errorMessage: string): boolean {
+    return errorMessage.includes("Priority is too low") || errorMessage.includes("1014") || errorMessage.includes("Transaction is already in the pool") || errorMessage.includes("Invalid Transaction");
   }
 
   private delay(ms: number): Promise<void> {

@@ -1,0 +1,7 @@
+[package]
+name = "player_prover"
+type = "bin"
+authors = ["Outmine"]
+compiler_version = ">=1.0.0"
+
+[dependencies]

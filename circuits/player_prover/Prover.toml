@@ -1,0 +1,18 @@
+// Test inputs for a single player:
+//   2 units, normal mode, success, no boosts, base_reward=10, team_bonus=20%
+//   Expected: 10 × 2 × (100 + 1×20)/100 = 10 × 2 × 1.2 = 24
+
+run_id = "1700000000"
+player_id = "123456789"
+rewards_earned = "24"
+timestamp = "1700000000"
+
+base_reward = "10"
+team_bonus = "20"
+mode_multiplier = "150"
+unit_count = "2"
+boost_multiplier = "0"
+item_multiplier = "0"
+game_mode = "0"
+random_outcome = "0"
+has_bonus_trait = "0"

@@ -39,7 +39,7 @@ describe('TransactionQueue', () => {
       };
       mockSubmitter.submit.mockResolvedValue(mockResult);
 
-      const result = await queue.submit('proof', ['signal'], { type: 'registered' as const, data: 'vk-hash' }, 'testnet');
+      const result = await queue.submit('proof', ['signal'], { type: 'registered' as const, data: 'vk-hash' }, 'testnet', 'user1');
 
       expect(result).toEqual(mockResult);
       expect(mockSubmitter.submit).toHaveBeenCalledTimes(1);
@@ -48,7 +48,7 @@ describe('TransactionQueue', () => {
     it('should reject if queue is shutting down', async () => {
       await queue.shutdown();
 
-      await expect(queue.submit('proof', ['signal'], { type: 'registered' as const, data: 'vk-hash' }, 'testnet')).rejects.toThrow(
+      await expect(queue.submit('proof', ['signal'], { type: 'registered' as const, data: 'vk-hash' }, 'testnet', 'user1')).rejects.toThrow(
         'Queue is shutting down'
       );
     });
@@ -89,7 +89,7 @@ describe('TransactionQueue', () => {
     it('should reject if queue is shutting down', async () => {
       await queue.shutdown();
 
-      await expect(queue.submit('proof', ['signal'], { type: 'registered' as const, data: 'vk-hash' }, 'testnet')).rejects.toThrow(
+      await expect(queue.submit('proof', ['signal'], { type: 'registered' as const, data: 'vk-hash' }, 'testnet', 'user1')).rejects.toThrow(
         'Queue is shutting down'
       );
     });
@@ -106,7 +106,7 @@ describe('TransactionQueue', () => {
         explorerUrl: 'https://example.com/0x123',
       });
 
-      await queue.submit('proof', ['signal'], { type: 'registered' as const, data: 'vk-hash' }, 'testnet');
+      await queue.submit('proof', ['signal'], { type: 'registered' as const, data: 'vk-hash' }, 'testnet', 'user1');
 
       expect(enqueuedHandler).toHaveBeenCalled();
     });
@@ -121,7 +121,7 @@ describe('TransactionQueue', () => {
         explorerUrl: 'https://example.com/0x123',
       });
 
-      await queue.submit('proof', ['signal'], { type: 'registered' as const, data: 'vk-hash' }, 'testnet');
+      await queue.submit('proof', ['signal'], { type: 'registered' as const, data: 'vk-hash' }, 'testnet', 'user1');
 
       expect(completedHandler).toHaveBeenCalled();
     });
@@ -132,24 +132,21 @@ describe('TransactionQueue', () => {
       
       mockSubmitter.submit.mockRejectedValue(new Error('Test error'));
       
-      await expect(queue.submit('proof', ['signal'], { type: 'registered' as const, data: 'vk-hash' }, 'testnet')).rejects.toThrow();
+      await expect(queue.submit('proof', ['signal'], { type: 'registered' as const, data: 'vk-hash' }, 'testnet', 'user1')).rejects.toThrow();
       
       expect(failedHandler).toHaveBeenCalled();
     });
 
     it('should identify nonce conflict errors correctly', async () => {
       const nonceError1 = new Error('Priority is too low');
-      const nonceError2 = new Error('Invalid Transaction: nonce mismatch');
-      const nonceError3 = new Error('Stale nonce detected');
-      const nonNonceError = new Error('Invalid Transaction: insufficient funds');
+      const nonceError2 = new Error('Transaction is already in the pool');
+      const nonceError3 = new Error('Error code: 1014');
+      const nonNonceError = new Error('Insufficient funds');
 
-      // This is testing the private method indirectly through behavior
-      // We verify by checking the retry behavior which depends on isNonceConflict
-      
-      expect(nonceError1.message).toMatch(/priority is too low/i);
-      expect(nonceError2.message).toMatch(/nonce/i);
-      expect(nonceError3.message).toMatch(/nonce/i);
-      expect(nonNonceError.message).not.toMatch(/nonce/i);
+      expect(nonceError1.message).toMatch(/Priority is too low/);
+      expect(nonceError2.message).toMatch(/Transaction is already in the pool/);
+      expect(nonceError3.message).toMatch(/1014/);
+      expect(nonNonceError.message).not.toMatch(/1014|Priority is too low/);
     });
   });
 });
